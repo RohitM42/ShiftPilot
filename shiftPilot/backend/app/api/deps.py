@@ -1,6 +1,10 @@
-from app.db.session import SessionLocal
+from typing import Generator
+from sqlalchemy.orm import Session
 
-def get_db():
+from app.db.database import SessionLocal
+
+
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
