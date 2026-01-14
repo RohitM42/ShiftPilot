@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     ENV: str = "development"
     DEBUG: bool = True
 
+    # Auth
+    SECRET_KEY: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
     # Database
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
