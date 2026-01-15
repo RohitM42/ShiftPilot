@@ -42,7 +42,7 @@ def update_user(
     user_id: int,
     payload: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(require_manager_or_admin),
+    current_user: Users = Depends(require_admin),
 ):
     user = db.query(Users).filter(Users.id == user_id).first()
     if not user:

@@ -1,14 +1,29 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user, require_manager_or_admin
+from app.api.deps import get_db, get_current_user
 from app.db.models.availability_rules import AvailabilityRules
 from app.db.models.employees import Employees
 from app.db.models.users import Users
+from app.db.models.user_roles import UserRoles, Role
 from app.schemas.availability_rules import AvailabilityRuleCreate, AvailabilityRuleUpdate, AvailabilityRuleResponse
 
 router = APIRouter(prefix="/availability-rules", tags=["availability-rules"])
+
+
+def is_manager_or_admin(db: Session, user: Users) -> bool:
+    """Check if user has manager or admin role"""
+    role = db.query(UserRoles).filter(
+        UserRoles.user_id == user.id,
+        UserRoles.role.in_([Role.ADMIN, Role.MANAGER])
+    ).first()
+    return role is not None
+
+
+def get_employee_for_user(db: Session, user: Users) -> Optional[Employees]:
+    """Get employee record for a user"""
+    return db.query(Employees).filter(Employees.user_id == user.id).first()
 
 
 @router.post("", response_model=AvailabilityRuleResponse, status_code=status.HTTP_201_CREATED)
@@ -17,20 +32,19 @@ def create_availability_rule(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
+    """Create availability rule - employees can create for themselves, managers/admins can create for anyone"""
     employee = db.query(Employees).filter(Employees.id == payload.employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # allow self OR manager/admin
-    if employee.user_id != current_user.id:
-        # not self → must be manager/admin
-        require_manager_or_admin(current_user)
+    # Check permission: must be own rule OR manager/admin
+    current_employee = get_employee_for_user(db, current_user)
+    is_own_rule = current_employee and current_employee.id == payload.employee_id
 
-    rule = AvailabilityRules(
-        employee_id=employee.id,
-        **payload.model_dump(exclude={"employee_id"})
-    )
+    if not is_own_rule and not is_manager_or_admin(db, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to create rules for other employees")
 
+    rule = AvailabilityRules(**payload.model_dump())
     db.add(rule)
     db.commit()
     db.refresh(rule)
@@ -41,11 +55,19 @@ def create_availability_rule(
 def get_availability_for_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(require_manager_or_admin),
+    current_user: Users = Depends(get_current_user),
 ):
+    """Get availability rules - employees can view their own, managers/admins can view anyone's"""
     employee = db.query(Employees).filter(Employees.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Check permission: must be own rules OR manager/admin
+    current_employee = get_employee_for_user(db, current_user)
+    is_own_rules = current_employee and current_employee.id == employee_id
+
+    if not is_own_rules and not is_manager_or_admin(db, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to view rules for other employees")
 
     return db.query(AvailabilityRules).filter(
         AvailabilityRules.employee_id == employee_id
@@ -59,15 +81,16 @@ def update_availability_rule(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
+    """Update availability rule - employees can update their own, managers/admins can update anyone's"""
     rule = db.query(AvailabilityRules).filter(AvailabilityRules.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Availability rule not found")
 
-    employee = db.query(Employees).filter(
-        Employees.user_id == current_user.id
-    ).first()
+    # Check permission: must be own rule OR manager/admin
+    current_employee = get_employee_for_user(db, current_user)
+    is_own_rule = current_employee and current_employee.id == rule.employee_id
 
-    if not employee or rule.employee_id != employee.id:
+    if not is_own_rule and not is_manager_or_admin(db, current_user):
         raise HTTPException(status_code=403, detail="Not allowed to modify this rule")
 
     update_data = payload.model_dump(exclude_unset=True)
@@ -85,15 +108,16 @@ def delete_availability_rule(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
+    """Delete availability rule - employees can delete their own, managers/admins can delete anyone's"""
     rule = db.query(AvailabilityRules).filter(AvailabilityRules.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Availability rule not found")
 
-    employee = db.query(Employees).filter(
-        Employees.user_id == current_user.id
-    ).first()
+    # Check permission: must be own rule OR manager/admin
+    current_employee = get_employee_for_user(db, current_user)
+    is_own_rule = current_employee and current_employee.id == rule.employee_id
 
-    if not employee or rule.employee_id != employee.id:
+    if not is_own_rule and not is_manager_or_admin(db, current_user):
         raise HTTPException(status_code=403, detail="Not allowed to delete this rule")
 
     db.delete(rule)

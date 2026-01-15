@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin
 from app.db.models.employee_departments import EmployeeDepartments
 from app.db.models.employees import Employees
 from app.db.models.departments import Departments
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/employee-departments", tags=["employee-departments"]
 def add_department_to_employee(
     payload: EmployeeDepartmentCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     # Validate employee exists
     employee = db.query(Employees).filter(Employees.id == payload.employee_id).first()
@@ -54,7 +54,7 @@ def add_department_to_employee(
 def get_departments_for_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     employee = db.query(Employees).filter(Employees.id == employee_id).first()
     if not employee:
@@ -68,7 +68,7 @@ def set_primary_department(
     employee_id: int,
     department_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     link = db.query(EmployeeDepartments).filter(
         EmployeeDepartments.employee_id == employee_id,
@@ -94,7 +94,7 @@ def remove_department_from_employee(
     employee_id: int,
     department_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     link = db.query(EmployeeDepartments).filter(
         EmployeeDepartments.employee_id == employee_id,

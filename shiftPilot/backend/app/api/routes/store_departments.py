@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.db.models.store_departments import StoreDepartment
 from app.db.models.stores import Stores
 from app.db.models.departments import Departments
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/store-departments", tags=["store-departments"])
 def add_department_to_store(
     payload: StoreDepartmentCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     # Validate store exists
     store = db.query(Stores).filter(Stores.id == payload.store_id).first()
@@ -61,7 +61,7 @@ def remove_department_from_store(
     store_id: int,
     department_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     link = db.query(StoreDepartment).filter(
         StoreDepartment.store_id == store_id,
