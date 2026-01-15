@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin
 from app.db.models.role_requirements import RoleRequirements
 from app.db.models.stores import Stores
 from app.db.models.users import Users
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/role-requirements", tags=["role-requirements"])
 def create_role_requirement(
     payload: RoleRequirementCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     store = db.query(Stores).filter(Stores.id == payload.store_id).first()
     if not store:
@@ -34,7 +34,7 @@ def list_role_requirements(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     query = db.query(RoleRequirements)
     if store_id:
@@ -47,7 +47,7 @@ def list_role_requirements(
 def get_role_requirement(
     requirement_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(RoleRequirements).filter(RoleRequirements.id == requirement_id).first()
     if not requirement:
@@ -60,7 +60,7 @@ def update_role_requirement(
     requirement_id: int,
     payload: RoleRequirementUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(RoleRequirements).filter(RoleRequirements.id == requirement_id).first()
     if not requirement:
@@ -80,7 +80,7 @@ def update_role_requirement(
 def delete_role_requirement(
     requirement_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(RoleRequirements).filter(RoleRequirements.id == requirement_id).first()
     if not requirement:

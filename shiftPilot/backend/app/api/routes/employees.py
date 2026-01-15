@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin
 from app.db.models.employees import Employees
 from app.db.models.users import Users
 from app.db.models.stores import Stores
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 def create_employee(
     payload: EmployeeCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     # Validate user exists
     user = db.query(Users).filter(Users.id == payload.user_id).first()
@@ -45,7 +45,7 @@ def list_employees(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     query = db.query(Employees)
     if store_id:
@@ -57,7 +57,7 @@ def list_employees(
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     employee = db.query(Employees).filter(Employees.id == employee_id).first()
     if not employee:
@@ -70,7 +70,7 @@ def update_employee(
     employee_id: int,
     payload: EmployeeUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     employee = db.query(Employees).filter(Employees.id == employee_id).first()
     if not employee:
@@ -96,7 +96,7 @@ def update_employee(
 def delete_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     employee = db.query(Employees).filter(Employees.id == employee_id).first()
     if not employee:

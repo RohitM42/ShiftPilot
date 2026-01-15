@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin
 from app.db.models.labour_budgets import LabourBudgets
 from app.db.models.store_departments import StoreDepartment
 from app.db.models.users import Users
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/labour-budgets", tags=["labour-budgets"])
 def create_labour_budget(
     payload: LabourBudgetCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     store_dept = db.query(StoreDepartment).filter(
         StoreDepartment.store_id == payload.store_id,
@@ -46,7 +46,7 @@ def list_labour_budgets(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     query = db.query(LabourBudgets)
     if store_id:
@@ -61,7 +61,7 @@ def list_labour_budgets(
 def get_labour_budget(
     budget_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     budget = db.query(LabourBudgets).filter(LabourBudgets.id == budget_id).first()
     if not budget:
@@ -74,7 +74,7 @@ def update_labour_budget(
     budget_id: int,
     payload: LabourBudgetUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     budget = db.query(LabourBudgets).filter(LabourBudgets.id == budget_id).first()
     if not budget:
@@ -93,7 +93,7 @@ def update_labour_budget(
 def delete_labour_budget(
     budget_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     budget = db.query(LabourBudgets).filter(LabourBudgets.id == budget_id).first()
     if not budget:

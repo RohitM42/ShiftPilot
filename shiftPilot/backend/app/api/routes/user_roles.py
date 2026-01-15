@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.db.models.user_roles import UserRoles
 from app.db.models.users import Users
 from app.db.models.stores import Stores
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/user-roles", tags=["user-roles"])
 def create_user_role(
     payload: UserRoleCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     user = db.query(Users).filter(Users.id == payload.user_id).first()
     if not user:
@@ -45,7 +45,7 @@ def create_user_role(
 def get_roles_for_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     user = db.query(Users).filter(Users.id == user_id).first()
     if not user:
@@ -58,7 +58,7 @@ def get_roles_for_user(
 def delete_user_role(
     role_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     role = db.query(UserRoles).filter(UserRoles.id == role_id).first()
     if not role:

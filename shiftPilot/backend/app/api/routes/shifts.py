@@ -1,25 +1,73 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin
 from app.db.models.shifts import Shifts
 from app.db.models.stores import Stores
 from app.db.models.departments import Departments
 from app.db.models.employees import Employees
 from app.db.models.users import Users
+from app.db.models.user_roles import UserRoles, Role
 from app.schemas.shifts import ShiftCreate, ShiftUpdate, ShiftResponse
 
 router = APIRouter(prefix="/shifts", tags=["shifts"])
+
+
+def check_store_access(db: Session, user: Users, store_id: int) -> bool:
+    """Check if user has manager/admin access to a specific store"""
+    # global admin can access any store
+    global_admin = db.query(UserRoles).filter(
+        UserRoles.user_id == user.id,
+        UserRoles.role == Role.ADMIN,
+        UserRoles.store_id.is_(None)
+    ).first()
+    if global_admin:
+        return True
+    
+    # store-level admin or manager
+    store_role = db.query(UserRoles).filter(
+        UserRoles.user_id == user.id,
+        UserRoles.store_id == store_id,
+        UserRoles.role.in_([Role.ADMIN, Role.MANAGER])
+    ).first()
+    return store_role is not None
+
+
+def get_accessible_store_ids(db: Session, user: Users) -> Optional[List[int]]:
+    """
+    Returns list of store IDs user can access, or None if global admin (all stores).
+    """
+    # global admin can access all
+    global_admin = db.query(UserRoles).filter(
+        UserRoles.user_id == user.id,
+        UserRoles.role == Role.ADMIN,
+        UserRoles.store_id.is_(None)
+    ).first()
+    if global_admin:
+        return None  # None means all stores
+    
+    # get store IDs where user has manager/admin role
+    roles = db.query(UserRoles).filter(
+        UserRoles.user_id == user.id,
+        UserRoles.role.in_([Role.ADMIN, Role.MANAGER]),
+        UserRoles.store_id.isnot(None)
+    ).all()
+    
+    return [r.store_id for r in roles]
 
 
 @router.post("", response_model=ShiftResponse, status_code=status.HTTP_201_CREATED)
 def create_shift(
     payload: ShiftCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
+    # check user has access to this store
+    if not check_store_access(db, current_user, payload.store_id):
+        raise HTTPException(status_code=403, detail="No access to this store")
+    
     store = db.query(Stores).filter(Stores.id == payload.store_id).first()
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
@@ -42,17 +90,31 @@ def create_shift(
 @router.get("", response_model=List[ShiftResponse])
 def list_shifts(
     store_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     employee_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
+    # get stores user can access
+    accessible_stores = get_accessible_store_ids(db, current_user)
+    
     query = db.query(Shifts)
+    
+    # filter by accessible stores (unless global admin)
+    if accessible_stores is not None:
+        if store_id and store_id not in accessible_stores:
+            raise HTTPException(status_code=403, detail="No access to this store")
+        query = query.filter(Shifts.store_id.in_(accessible_stores))
+    
+    #optional filters
     if store_id:
         query = query.filter(Shifts.store_id == store_id)
+    if department_id:
+        query = query.filter(Shifts.department_id == department_id)
     if employee_id:
         query = query.filter(Shifts.employee_id == employee_id)
     if start_date:
@@ -72,7 +134,22 @@ def get_shift(
     shift = db.query(Shifts).filter(Shifts.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
-    return shift
+    
+    # Check access
+    accessible_stores = get_accessible_store_ids(db, current_user)
+    
+    # Get employee record for current user
+    employee = db.query(Employees).filter(Employees.user_id == current_user.id).first()
+    is_own_shift = employee and shift.employee_id == employee.id
+    
+    if accessible_stores is None:  # Global admin
+        return shift
+    if shift.store_id in accessible_stores:  # Store manager/admin
+        return shift
+    if is_own_shift:  # Own shift
+        return shift
+    
+    raise HTTPException(status_code=403, detail="No access to this shift")
 
 
 @router.put("/{shift_id}", response_model=ShiftResponse)
@@ -80,11 +157,15 @@ def update_shift(
     shift_id: int,
     payload: ShiftUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     shift = db.query(Shifts).filter(Shifts.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+
+    # Check user has access
+    if not check_store_access(db, current_user, shift.store_id):
+        raise HTTPException(status_code=403, detail="No access to this store")
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -99,11 +180,15 @@ def update_shift(
 def delete_shift(
     shift_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     shift = db.query(Shifts).filter(Shifts.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+
+    # Check user has access
+    if not check_store_access(db, current_user, shift.store_id):
+        raise HTTPException(status_code=403, detail="No access to this store")
 
     db.delete(shift)
     db.commit()

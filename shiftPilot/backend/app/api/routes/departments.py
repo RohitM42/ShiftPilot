@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin, require_manager_or_admin
 from app.db.models.departments import Departments
 from app.db.models.users import Users
 from app.schemas.departments import DepartmentCreate, DepartmentUpdate, DepartmentResponse
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/departments", tags=["departments"])
 def create_department(
     payload: DepartmentCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     existing = db.query(Departments).filter(
         (Departments.name == payload.name) | (Departments.code == payload.code)
@@ -56,7 +56,7 @@ def update_department(
     department_id: int,
     payload: DepartmentUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     department = db.query(Departments).filter(Departments.id == department_id).first()
     if not department:
@@ -75,7 +75,7 @@ def update_department(
 def delete_department(
     department_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     department = db.query(Departments).filter(Departments.id == department_id).first()
     if not department:

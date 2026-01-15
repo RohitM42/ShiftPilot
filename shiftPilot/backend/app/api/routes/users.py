@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin, require_manager_or_admin
 from app.core.security import get_password_hash
 from app.db.models.users import Users
 from app.schemas.users import UserCreate, UserUpdate, UserResponse
@@ -20,7 +20,7 @@ def list_users(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     return db.query(Users).offset(skip).limit(limit).all()
 
@@ -29,7 +29,7 @@ def list_users(
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     user = db.query(Users).filter(Users.id == user_id).first()
     if not user:
@@ -42,7 +42,7 @@ def update_user(
     user_id: int,
     payload: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     user = db.query(Users).filter(Users.id == user_id).first()
     if not user:
@@ -61,7 +61,7 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     user = db.query(Users).filter(Users.id == user_id).first()
     if not user:

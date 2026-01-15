@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_admin
 from app.db.models.stores import Stores
 from app.db.models.users import Users
 from app.schemas.stores import StoreCreate, StoreUpdate, StoreResponse
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/stores", tags=["stores"])
 def create_store(
     payload: StoreCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     existing = db.query(Stores).filter(Stores.name == payload.name).first()
     if existing:
@@ -54,7 +54,7 @@ def update_store(
     store_id: int,
     payload: StoreUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     store = db.query(Stores).filter(Stores.id == store_id).first()
     if not store:
@@ -73,7 +73,7 @@ def update_store(
 def delete_store(
     store_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_admin),
 ):
     store = db.query(Stores).filter(Stores.id == store_id).first()
     if not store:

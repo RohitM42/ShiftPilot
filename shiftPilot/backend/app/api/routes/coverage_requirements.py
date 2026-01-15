@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_manager_or_admin
 from app.db.models.coverage_requirements import CoverageRequirements
 from app.db.models.store_departments import StoreDepartment
 from app.db.models.users import Users
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/coverage-requirements", tags=["coverage-requirements
 def create_coverage_requirement(
     payload: CoverageRequirementCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     store_dept = db.query(StoreDepartment).filter(
         StoreDepartment.store_id == payload.store_id,
@@ -38,7 +38,7 @@ def list_coverage_requirements(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     query = db.query(CoverageRequirements)
     if store_id:
@@ -53,7 +53,7 @@ def list_coverage_requirements(
 def get_coverage_requirement(
     requirement_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(CoverageRequirements).filter(CoverageRequirements.id == requirement_id).first()
     if not requirement:
@@ -66,7 +66,7 @@ def update_coverage_requirement(
     requirement_id: int,
     payload: CoverageRequirementUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(CoverageRequirements).filter(CoverageRequirements.id == requirement_id).first()
     if not requirement:
@@ -86,7 +86,7 @@ def update_coverage_requirement(
 def delete_coverage_requirement(
     requirement_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(require_manager_or_admin),
 ):
     requirement = db.query(CoverageRequirements).filter(CoverageRequirements.id == requirement_id).first()
     if not requirement:
