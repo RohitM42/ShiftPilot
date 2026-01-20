@@ -42,6 +42,7 @@ def three_employees() -> list[Employee]:
 
 @pytest.fixture
 def employees_with_roles() -> list[Employee]:
+    # 3 employees with varied roles
     return [
         Employee(id=1, store_id=1, is_keyholder=True, is_manager=True,
                  contracted_weekly_hours=40, department_ids=[1], primary_department_id=1),
@@ -54,6 +55,7 @@ def employees_with_roles() -> list[Employee]:
 
 @pytest.fixture
 def coverage_req() -> CoverageRequirement:
+    # coverage requirement for dept 1 on Mondays
     return CoverageRequirement(
         id=1, store_id=1, department_id=1, day_of_week=0,
         start_time=time(10, 0), end_time=time(18, 0), min_staff=2, max_staff=4,
@@ -62,6 +64,7 @@ def coverage_req() -> CoverageRequirement:
 
 @pytest.fixture
 def keyholder_req() -> RoleRequirement:
+    # keyholder requirement for 'openings'
     return RoleRequirement(
         id=1, store_id=1, department_id=None, day_of_week=None,
         start_time=time(6, 0), end_time=time(10, 0),
@@ -71,6 +74,7 @@ def keyholder_req() -> RoleRequirement:
 
 @pytest.fixture
 def manager_req() -> RoleRequirement:
+    # manager requirement for 'daytime'
     return RoleRequirement(
         id=2, store_id=1, department_id=None, day_of_week=None,
         start_time=time(10, 0), end_time=time(18, 0),
