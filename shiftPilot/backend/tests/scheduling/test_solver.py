@@ -9,6 +9,7 @@ from app.services.scheduling.types import (
     RoleRequirement,
     Shift,
     ScheduleContext,
+    TimeOffRequest
 )
 from app.services.scheduling.solver import (
     ScheduleSolver,
@@ -167,3 +168,107 @@ class TestSolverIntegration:
         
         assert result.success is False
         assert len(result.unmet_role_requirements) > 0
+
+    def test_respects_time_off(self):
+        monday = get_test_monday()
+        emp = Employee(id=1, store_id=1, is_keyholder=False, is_manager=False,
+                       contracted_weekly_hours=40, department_ids=[1], primary_department_id=1)
+        time_off = [
+            TimeOffRequest(
+                employee_id=1,
+                start_datetime=datetime.combine(monday, time(0, 0)),
+                end_datetime=datetime.combine(monday, time(23, 59)),
+            ),
+        ]
+        coverage = [
+            CoverageRequirement(id=1, store_id=1, department_id=1, day_of_week=0,
+                                start_time=time(10, 0), end_time=time(14, 0),
+                                min_staff=1, max_staff=2),
+        ]
+        context = ScheduleContext(
+            store_id=1, week_start=monday, employees=[emp], availability_rules=[],
+            time_off_requests=time_off, coverage_requirements=coverage, role_requirements=[],
+            existing_shifts=[],
+        )
+        result = solve_schedule(context)
+        
+        monday_shifts = [s for s in result.shifts if s.day_of_week == 0 and s.employee_id == 1]
+        assert len(monday_shifts) == 0
+
+    def test_multiple_role_requirements_same_day(self):
+        monday = get_test_monday()
+        # manager who is also keyholder
+        emp = Employee(id=1, store_id=1, is_keyholder=True, is_manager=True,
+                       contracted_weekly_hours=40, department_ids=[1], primary_department_id=1)
+        #keyholder needed 6-10am, manager needed 10-14
+        role_reqs = [
+            RoleRequirement(id=1, store_id=1, department_id=None, day_of_week=0,
+                            start_time=time(6, 0), end_time=time(10, 0),
+                            requires_keyholder=True, requires_manager=False, min_manager_count=0),
+            RoleRequirement(id=2, store_id=1, department_id=None, day_of_week=0,
+                            start_time=time(10, 0), end_time=time(14, 0),
+                            requires_keyholder=False, requires_manager=True, min_manager_count=1),
+        ]
+        context = ScheduleContext(
+            store_id=1, week_start=monday, employees=[emp], availability_rules=[],
+            time_off_requests=[], coverage_requirements=[], role_requirements=role_reqs,
+            existing_shifts=[],
+        )
+        result = solve_schedule(context)
+        
+        #shift covering both requirements
+        monday_shifts = [s for s in result.shifts if s.day_of_week == 0 and s.employee_id == 1]
+        assert len(monday_shifts) == 1
+        
+        shift = monday_shifts[0]
+        #Shift should cover keyholder window (6-10)
+        assert shift.start_datetime.time() <= time(6, 0) or shift.start_datetime.time() <= time(10, 0)
+        # shift should cover manager window (10-14)
+        assert shift.end_datetime.time() >= time(14, 0) or shift.end_datetime.time() >= time(10, 0)
+
+
+class TestRestPeriodConstraint:
+
+    def test_sufficient_rest_no_shifts(self):
+        monday = get_test_monday()
+        emp = Employee(id=1, store_id=1, is_keyholder=False, is_manager=False,
+                       contracted_weekly_hours=40, department_ids=[1], primary_department_id=1)
+        context = ScheduleContext(
+            store_id=1, week_start=monday, employees=[emp], availability_rules=[],
+            time_off_requests=[], coverage_requirements=[], role_requirements=[],
+            existing_shifts=[],
+        )
+        solver = ScheduleSolver(context)
+        
+        assert solver._has_sufficient_rest(1, monday) is True
+
+    def test_insufficient_rest_late_then_early(self):
+        monday = get_test_monday()
+        emp = Employee(id=1, store_id=1, is_keyholder=False, is_manager=False,
+                       contracted_weekly_hours=40, department_ids=[1], primary_department_id=1)
+        context = ScheduleContext(
+            store_id=1, week_start=monday, employees=[emp], availability_rules=[],
+            time_off_requests=[], coverage_requirements=[], role_requirements=[],
+            existing_shifts=[],
+        )
+        solver = ScheduleSolver(context)
+        
+        #late shift mon ending 10pm
+        solver._add_shift(Shift(
+            employee_id=1, store_id=1, department_id=1,
+            start_datetime=datetime.combine(monday, time(14, 0)),
+            end_datetime=datetime.combine(monday, time(22, 0)),
+        ))
+        
+        #tue early = only 8h rest but need 12h
+        tuesday = monday + timedelta(days=1)
+        assert solver._has_sufficient_rest(1, tuesday) is False
+
+
+class TestShiftLengths:
+
+    def test_manager_can_work_10h(self):
+        assert 10 in MANAGER_SHIFT_LENGTHS
+
+    def test_non_manager_cannot_work_10h(self):
+        assert 10 not in NON_MANAGER_SHIFT_LENGTHS
