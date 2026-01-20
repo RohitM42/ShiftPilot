@@ -29,7 +29,7 @@ class Employee:
 @dataclass
 class AvailabilityRule:
     employee_id: int
-    day_of_week: int  # 0=Monday, 6=Sunday
+    day_of_week: int  # 0-6
     rule_type: AvailabilityType
     start_time: Optional[time] = None  # None means all day
     end_time: Optional[time] = None
