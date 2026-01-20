@@ -204,8 +204,8 @@ def load_existing_shifts(
             employee_id=s.employee_id,
             store_id=s.store_id,
             department_id=s.department_id,
-            start_datetime=s.start_datetime_utc,
-            end_datetime=s.end_datetime_utc,
+            start_datetime=s.start_datetime_utc.replace(tzinfo=None),
+            end_datetime=s.end_datetime_utc.replace(tzinfo=None),
         )
         for s in rows
     ]

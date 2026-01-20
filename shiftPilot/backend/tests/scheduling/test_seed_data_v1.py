@@ -1,4 +1,3 @@
-#uses the seed data from seed_data_v1 to test the solver logic in a simulated organisation.
 import pytest
 from datetime import date, time, datetime, timedelta
 
@@ -29,11 +28,11 @@ class TestDataLoader:
         monday = get_next_monday()
         context = load_schedule_context(db, store_id=100001, week_start=monday)
         
-        # Store 100001 has 5 active employees
-        assert len(context.employees) == 5
+        # Store 100001 has 7 active employees (added 2 new ones)
+        assert len(context.employees) == 7
         
         emp_ids = {e.id for e in context.employees}
-        assert emp_ids == {100001, 100003, 100004, 100005, 100006}
+        assert emp_ids == {100001, 100003, 100004, 100005, 100006, 100010, 100011}
 
     def test_loads_store_2_excludes_on_leave(self, db):
         monday = get_next_monday()
@@ -59,7 +58,7 @@ class TestDataLoader:
         
         # Employee 100003 has Mon-Fri available, Sat-Sun unavailable
         emp_rules = [r for r in context.availability_rules if r.employee_id == 100003]
-        assert len(emp_rules) == 7  # should be 5 available + 2 unavailable
+        assert len(emp_rules) == 7  # 5 available + 2 unavailable
 
     def test_loads_coverage_requirements(self, db):
         monday = get_next_monday()
@@ -163,7 +162,7 @@ class TestSolverWithSeedData:
         
         result = solve_schedule(context)
         
-        #Employee 100003 unavailable weekends
+        # Employee 100003 unavailable weekends
         saturday_shifts_100003 = [
             s for s in result.shifts 
             if s.employee_id == 100003 and s.day_of_week == 5
@@ -196,7 +195,6 @@ class TestSolverWithSeedData:
                 day_str = days[req.day_of_week] if req.day_of_week is not None else "Every day"
                 role = "manager" if req.requires_manager else "keyholder" if req.requires_keyholder else "unknown"
                 print(f"  {day_str} {req.start_time}-{req.end_time} needs {role}")
-            
         
         if result.unmet_contracted_hours:
             print(f"\nHour shortfalls:")
@@ -220,4 +218,12 @@ class TestSolverWithSeedData:
         
         print(f"{'='*50}\n")
         
-        assert True  # should always pass
+        print("Hours Summary:")
+        for emp in sorted(context.employees, key=lambda e: e.id):
+            assigned = sum(s.duration_hours for s in result.shifts if s.employee_id == emp.id)
+            diff = assigned - emp.contracted_weekly_hours
+            sign = "+" if diff >= 0 else ""
+            print(f"  Emp {emp.id}: {assigned}h / {emp.contracted_weekly_hours}h ({sign}{diff}h)")
+        print(f"\n{'='*50}")
+        
+        assert True  # Always passes, just for output
