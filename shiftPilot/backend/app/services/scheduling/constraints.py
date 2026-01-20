@@ -5,7 +5,6 @@ Handles coverage requirements, role requirements, and contracted hours. ***budge
 
 from datetime import datetime, date, time, timedelta
 from typing import Optional
-from collections import defaultdict
 
 from .types import (
     Employee,

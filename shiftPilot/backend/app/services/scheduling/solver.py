@@ -11,7 +11,6 @@ Strategy:
 from datetime import datetime, date, time, timedelta
 from typing import Optional
 from collections import defaultdict
-from copy import deepcopy
 
 from .types import (
     Employee,
