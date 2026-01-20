@@ -183,11 +183,26 @@ class TestSolverWithSeedData:
         print(f"Success: {result.success}")
         
         if result.unmet_coverage:
-            print(f"Unmet coverage: {len(result.unmet_coverage)}")
+            print(f"\nUnmet coverage ({len(result.unmet_coverage)}):")
+            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            for cov in result.unmet_coverage:
+                print(f"  {days[cov.day_of_week]} {cov.start_time}-{cov.end_time} "
+                      f"Dept {cov.department_id} needs {cov.min_staff} staff")
+        
         if result.unmet_role_requirements:
-            print(f"Unmet roles: {len(result.unmet_role_requirements)}")
+            print(f"\nUnmet role requirements ({len(result.unmet_role_requirements)}):")
+            days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            for req in result.unmet_role_requirements:
+                day_str = days[req.day_of_week] if req.day_of_week is not None else "Every day"
+                role = "manager" if req.requires_manager else "keyholder" if req.requires_keyholder else "unknown"
+                print(f"  {day_str} {req.start_time}-{req.end_time} needs {role}")
+            
+        
         if result.unmet_contracted_hours:
-            print(f"Hour shortfalls: {result.unmet_contracted_hours}")
+            print(f"\nHour shortfalls:")
+            for emp_id, shortfall in result.unmet_contracted_hours.items():
+                emp = next(e for e in context.employees if e.id == emp_id)
+                print(f"  Emp {emp_id}: {shortfall}h short (contracted {emp.contracted_weekly_hours}h)")
         
         days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         for day_idx, day_name in enumerate(days):
