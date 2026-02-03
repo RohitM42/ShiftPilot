@@ -28,11 +28,11 @@ class TestDataLoader:
         monday = get_next_monday()
         context = load_schedule_context(db, store_id=100001, week_start=monday)
         
-        # Store 100001 has 7 active employees (added 2 new ones)
-        assert len(context.employees) == 7
+        # Store 100001 has 9 active employees
+        assert len(context.employees) == 9
         
         emp_ids = {e.id for e in context.employees}
-        assert emp_ids == {100001, 100003, 100004, 100005, 100006, 100010, 100011}
+        assert emp_ids == {100001, 100003, 100004, 100005, 100006, 100010, 100011, 100012, 100013}
 
     def test_loads_store_2_excludes_on_leave(self, db):
         monday = get_next_monday()
@@ -219,8 +219,10 @@ class TestSolverWithSeedData:
         print(f"{'='*50}\n")
         
         print("Hours Summary:")
+        # Combine existing shifts with new shifts for total hours
+        all_shifts = list(context.existing_shifts) + list(result.shifts)
         for emp in sorted(context.employees, key=lambda e: e.id):
-            assigned = sum(s.duration_hours for s in result.shifts if s.employee_id == emp.id)
+            assigned = sum(s.duration_hours for s in all_shifts if s.employee_id == emp.id)
             diff = assigned - emp.contracted_weekly_hours
             sign = "+" if diff >= 0 else ""
             print(f"  Emp {emp.id}: {assigned}h / {emp.contracted_weekly_hours}h ({sign}{diff}h)")

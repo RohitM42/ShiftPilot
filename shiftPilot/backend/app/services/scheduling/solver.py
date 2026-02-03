@@ -65,13 +65,21 @@ class ScheduleSolver:
             ScheduleResult with generated shifts and any unmet constraints
         """
         #1: Cover all coverage requirements
-        self._cover_requirements()     
+        self._cover_requirements()
         #2: Satisfy role requirements
         self._satisfy_role_requirements()
         #3: Fill contracted hours
         self._fill_contracted_hours()
-        #4: Result
+        #4: Retry coverage gaps (some employees may now be available)
+        self._retry_coverage_gaps()
+        #5: Result
         return self._build_result()
+    
+    def _retry_coverage_gaps(self):
+        """Retry filling any remaining coverage gaps after contracted hours filled."""
+        sorted_reqs = self._sort_requirements_by_constraint()
+        for req in sorted_reqs:
+            self._cover_single_requirement(req)
     
     def _cover_requirements(self):
         """1: Generate shifts to meet coverage requirements."""
@@ -79,13 +87,18 @@ class ScheduleSolver:
         # Sort requirements by most constrained first (fewer available employees)
         sorted_reqs = self._sort_requirements_by_constraint()
         
+        # First pass
+        for req in sorted_reqs:
+            self._cover_single_requirement(req)
+        
+        # Second pass - retry any gaps (employees may now be available on different days)
         for req in sorted_reqs:
             self._cover_single_requirement(req)
     
     def _sort_requirements_by_constraint(self) -> list[CoverageRequirement]:
-        """Sort coverage requirements - fewest options first."""
+        """Sort coverage requirements - hardest to fill first."""
         
-        def count_available(req: CoverageRequirement) -> int:
+        def constraint_score(req: CoverageRequirement) -> tuple[float, int]:
             slot_date = self.context.week_start + timedelta(days=req.day_of_week)
             start_dt = datetime.combine(slot_date, req.start_time)
             end_dt = datetime.combine(slot_date, req.end_time)
@@ -99,9 +112,11 @@ class ScheduleSolver:
                 self.context.time_off_requests,
                 self.shifts,
             )
-            return len(available)
+            # Ratio of available employees to required staff (lower = harder)
+            ratio = len(available) / max(req.min_staff, 1)
+            return (ratio, -req.min_staff)
         
-        return sorted(self.context.coverage_requirements, key=count_available)
+        return sorted(self.context.coverage_requirements, key=constraint_score)
     
     def _cover_single_requirement(self, req: CoverageRequirement):
         """Attempt to cover a single coverage requirement."""
@@ -140,9 +155,8 @@ class ScheduleSolver:
     ) -> Optional[Shift]:
         """
         Find the best shift to cover a target time within a coverage window.
-        Tries different shift lengths and start times.
+        Scores all valid candidates and picks the best.
         """
-        
         day_of_week = target_time.weekday()
         target_date = target_time.date()
         
@@ -152,8 +166,8 @@ class ScheduleSolver:
             if department_id in e.department_ids
         ]
         
-        best_shift = None
-        best_score = float('-inf')
+        # Score all valid (employee, shift) combinations
+        scored_options: list[tuple[float, Shift, Employee]] = []
         
         for emp in candidates:
             # Skip if already working this day
@@ -174,11 +188,14 @@ class ScheduleSolver:
                 
                 if shift:
                     score = self._score_shift(shift, emp, department_id)
-                    if score > best_score:
-                        best_score = score
-                        best_shift = shift
+                    scored_options.append((score, shift, emp))
         
-        return best_shift
+        if not scored_options:
+            return None
+        
+        # Sort by score descending, pick best
+        scored_options.sort(key=lambda x: -x[0])
+        return scored_options[0][1]
     
     def _find_valid_shift_time(
         self,
@@ -292,12 +309,23 @@ class ScheduleSolver:
         - Preference for 8h shifts
         - Penalty for overtime (exceeding contracted hours)
         - Preference for employees with hours still needed
+        - Bonus for departments with higher min_staff requirements
         """
         score = 0.0
         
+        # Department staffing need bonus - prioritize depts that need more people
+        dept_min_staff = max(
+            (req.min_staff for req in self.context.coverage_requirements 
+             if req.department_id == department_id),
+            default=1
+        )
+        score += dept_min_staff * 5  # +10 for 2-staff depts, +5 for 1-staff
+        
         # Primary department bonus
         if department_id == employee.primary_department_id:
-            score += 10
+            score += 25
+        else:
+            score -= 15  # Penalty for non-primary dept
         
         # Availability preference bonus
         avail = get_availability_for_slot(
@@ -406,8 +434,8 @@ class ScheduleSolver:
                 continue
             candidates.append(emp)
         
-        best_shift = None
-        best_score = float('-inf')
+        # Score all valid options
+        scored_options: list[tuple[float, Shift, Employee]] = []
         
         for emp in candidates:
             # Skip if already working this day
@@ -444,28 +472,35 @@ class ScheduleSolver:
                 
                 if shift:
                     score = self._score_shift(shift, emp, dept_id)
-                    # Bonus for role match
-                    score += 20
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_shift = shift
+                    score += 20  # Bonus for role match
+                    scored_options.append((score, shift, emp))
         
-        return best_shift
+        if not scored_options:
+            return None
+        
+        # Sort by score descending, pick best
+        scored_options.sort(key=lambda x: -x[0])
+        return scored_options[0][1]
     
     def _fill_contracted_hours(self):
         """3: Assign additional shifts to meet contracted hours."""
         
-        # Sort employees by hours (most needed first)
-        employees_needing_hours = [
-            (emp, emp.contracted_weekly_hours - self.employee_hours[emp.id])
-            for emp in self.context.employees
-            if self.employee_hours[emp.id] < emp.contracted_weekly_hours
-        ]
-        employees_needing_hours.sort(key=lambda x: -x[1])  # Most needed first
-        
-        for emp, needed in employees_needing_hours:
-            self._fill_employee_hours(emp, needed)
+        # Multiple passes to ensure we fill hours
+        for _ in range(3):
+            employees_needing_hours = [
+                (emp, emp.contracted_weekly_hours - self.employee_hours[emp.id])
+                for emp in self.context.employees
+                if self.employee_hours[emp.id] < emp.contracted_weekly_hours
+            ]
+            
+            if not employees_needing_hours:
+                break
+                
+            # Sort employees by hours (most needed first)
+            employees_needing_hours.sort(key=lambda x: -x[1])
+            
+            for emp, needed in employees_needing_hours:
+                self._fill_employee_hours(emp, needed)
     
     def _fill_employee_hours(self, employee: Employee, needed: float):
         """Try to fill an employee's contracted hours with additional shifts."""
@@ -485,11 +520,8 @@ class ScheduleSolver:
             if not self._has_sufficient_rest(employee.id, target_date):
                 continue
             
-            # Find a suitable shift length
-            for length in allowed_lengths:
-                if length > needed + 2:  # Allow small overage
-                    continue
-                
+            # Try each shift length, preferring longer shifts to fill hours faster
+            for length in sorted(allowed_lengths, reverse=True):
                 shift = self._find_open_shift(employee, target_date, length)
                 if shift:
                     self._add_shift(shift)
@@ -505,31 +537,39 @@ class ScheduleSolver:
         """Find an open shift slot for an employee on a given day."""
         
         length = timedelta(hours=length_hours)
-        dept_id = employee.primary_department_id or employee.department_ids[0]
         
-        # Try different start times
-        for hour in range(6, 19):  # 6am to 6pm starts
-            start = datetime.combine(target_date, time(hour, 0))
-            end = start + length
-            
-            can_work, _ = can_employee_work_shift(
-                employee,
-                start,
-                end,
-                dept_id,
-                self.context.availability_rules,
-                self.context.time_off_requests,
-                self.shifts,
-            )
-            
-            if can_work:
-                return Shift(
-                    employee_id=employee.id,
-                    store_id=self.context.store_id,
-                    department_id=dept_id,
-                    start_datetime=start,
-                    end_datetime=end,
+        # Try primary department first, then others
+        departments_to_try = []
+        if employee.primary_department_id:
+            departments_to_try.append(employee.primary_department_id)
+        for dept_id in employee.department_ids:
+            if dept_id not in departments_to_try:
+                departments_to_try.append(dept_id)
+        
+        for dept_id in departments_to_try:
+            # Try different start times
+            for hour in range(6, 19):  # 6am to 6pm starts
+                start = datetime.combine(target_date, time(hour, 0))
+                end = start + length
+                
+                can_work, _ = can_employee_work_shift(
+                    employee,
+                    start,
+                    end,
+                    dept_id,
+                    self.context.availability_rules,
+                    self.context.time_off_requests,
+                    self.shifts,
                 )
+                
+                if can_work:
+                    return Shift(
+                        employee_id=employee.id,
+                        store_id=self.context.store_id,
+                        department_id=dept_id,
+                        start_datetime=start,
+                        end_datetime=end,
+                    )
         
         return None
     
@@ -556,7 +596,7 @@ class ScheduleSolver:
             count = len(validation['hour_shortfalls'])
             warnings.append(f"{count} employees under contracted hours")
         
-        # exclude existing shifts
+        # exclude existing shifts - only return NEW shifts created by solver
         existing_ids = {
             (s.employee_id, s.start_datetime, s.end_datetime) 
             for s in self.context.existing_shifts
