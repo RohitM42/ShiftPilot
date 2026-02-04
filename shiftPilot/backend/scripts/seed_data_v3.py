@@ -1,6 +1,6 @@
 """
 Seed script for ShiftPilot development database.
-Run with: python -m scripts.seed_data_v2
+Run with: python -m scripts.seed_data_v3
 """
 
 import sys
@@ -470,7 +470,7 @@ def seed_employees(db):
             contracted_weekly_hours=24,
             dob=date(1996, 4, 22),
         ),
-        # Employee 11 (Store 1) - Full-time keyholder, CS primary, evening coverage
+        # Employee 11 (Store 1) - Full-time keyholder, CS primary, flexible for opening/closing
         Employees(
             id=100013,
             user_id=100014,
@@ -591,14 +591,15 @@ def seed_availability_rules(db):
         AvailabilityRules(id=100021, employee_id=100012, day_of_week=5, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
         AvailabilityRules(id=100022, employee_id=100012, day_of_week=6, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
         
-        # Employee 11 (Store 1) - Full-time, available all week, prefers afternoons/evenings
-        AvailabilityRules(id=100029, employee_id=100013, day_of_week=0, start_time_local=time(12, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
-        AvailabilityRules(id=100030, employee_id=100013, day_of_week=1, start_time_local=time(12, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
-        AvailabilityRules(id=100031, employee_id=100013, day_of_week=2, start_time_local=time(12, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
-        AvailabilityRules(id=100032, employee_id=100013, day_of_week=3, start_time_local=time(12, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
-        AvailabilityRules(id=100033, employee_id=100013, day_of_week=4, start_time_local=time(12, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.PREFERRED, priority=2, active=True),
-        AvailabilityRules(id=100034, employee_id=100013, day_of_week=5, start_time_local=time(10, 0), end_time_local=time(20, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
-        AvailabilityRules(id=100035, employee_id=100013, day_of_week=6, start_time_local=time(10, 0), end_time_local=time(20, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        # Employee 11 (Store 1) - Full-time keyholder, available all week for opening/closing coverage
+        # Available 6am-22pm Mon-Fri, can do mornings for keyholder coverage
+        AvailabilityRules(id=100029, employee_id=100013, day_of_week=0, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100030, employee_id=100013, day_of_week=1, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100031, employee_id=100013, day_of_week=2, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100032, employee_id=100013, day_of_week=3, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100033, employee_id=100013, day_of_week=4, start_time_local=time(6, 0), end_time_local=time(22, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100034, employee_id=100013, day_of_week=5, start_time_local=time(6, 0), end_time_local=time(20, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
+        AvailabilityRules(id=100035, employee_id=100013, day_of_week=6, start_time_local=time(6, 0), end_time_local=time(20, 0), rule_type=AvailabilityRuleType.AVAILABLE, priority=1, active=True),
     ]
     
     for rule in rules:

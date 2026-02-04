@@ -4,7 +4,7 @@ Schedule solver using greedy seeding with backtracking.
 Strategy:
 1. Generate time slots that need coverage from requirements
 2. Greedy pass: assign shifts to cover slots, prioritizing constrained slots
-3. Backtrack when conflicts arise
+3. Satisfy role requirements (extend existing shifts or add new ones)
 4. Fill remaining contracted hours with additional shifts
 """
 
@@ -34,10 +34,14 @@ from .constraints import (
 )
 
 
-
-SHIFT_LENGTHS = [8, 4, 6, 10] # Priority order
-MANAGER_SHIFT_LENGTHS = [8, 4, 6, 10]  # Managers can do longer shifts
-NON_MANAGER_SHIFT_LENGTHS = [8, 4, 6]  # Standard shift times
+# Shift length configuration
+# Standard lengths get scoring bonus, but we allow flexibility
+STANDARD_SHIFT_LENGTHS = [8, 6, 4, 10]  # Preferred in scoring
+MANAGER_SHIFT_LENGTHS = [8, 6, 4, 10, 9, 7, 5, 11, 12]  # 4-12h allowed
+REGULAR_SHIFT_LENGTHS = [8, 6, 4, 7, 5, 9]  # 4-9h allowed
+MIN_SHIFT_HOURS = 4
+MAX_MANAGER_HOURS = 12
+MAX_REGULAR_HOURS = 9
 MIN_REST_HOURS = 12  # Minimum hours between shifts
 
 
@@ -64,15 +68,20 @@ class ScheduleSolver:
         Returns:
             ScheduleResult with generated shifts and any unmet constraints
         """
-        #1: Cover all coverage requirements
+        # Phase 1: Cover all coverage requirements
         self._cover_requirements()
-        #2: Satisfy role requirements
+        
+        # Phase 2: Satisfy role requirements (keyholder/manager)
+        # This may extend existing shifts or add new ones
         self._satisfy_role_requirements()
-        #3: Fill contracted hours
+        
+        # Phase 3: Fill contracted hours
         self._fill_contracted_hours()
-        #4: Retry coverage gaps (some employees may now be available)
+        
+        # Phase 4: Retry coverage gaps (some employees may now be available)
         self._retry_coverage_gaps()
-        #5: Result
+        
+        # Phase 5: Build result
         return self._build_result()
     
     def _retry_coverage_gaps(self):
@@ -82,7 +91,7 @@ class ScheduleSolver:
             self._cover_single_requirement(req)
     
     def _cover_requirements(self):
-        """1: Generate shifts to meet coverage requirements."""
+        """Phase 1: Generate shifts to meet coverage requirements."""
         
         # Sort requirements by most constrained first (fewer available employees)
         sorted_reqs = self._sort_requirements_by_constraint()
@@ -174,12 +183,17 @@ class ScheduleSolver:
             if day_of_week in self.employee_days[emp.id]:
                 continue
             
+            # Skip if already significantly over contracted hours (more than 4h overtime)
+            current_hours = self.employee_hours[emp.id]
+            if current_hours >= emp.contracted_weekly_hours + 4:
+                continue
+            
             # Check rest constraint
             if not self._has_sufficient_rest(emp.id, target_date):
                 continue
             
-            # Get allowed shift lengths
-            allowed_lengths = MANAGER_SHIFT_LENGTHS if emp.is_manager else NON_MANAGER_SHIFT_LENGTHS
+            # Get allowed shift lengths for this employee
+            allowed_lengths = self._get_allowed_shift_lengths(emp)
             
             for length in allowed_lengths:
                 shift = self._find_valid_shift_time(
@@ -196,6 +210,12 @@ class ScheduleSolver:
         # Sort by score descending, pick best
         scored_options.sort(key=lambda x: -x[0])
         return scored_options[0][1]
+    
+    def _get_allowed_shift_lengths(self, employee: Employee) -> list[int]:
+        """Get allowed shift lengths for an employee based on role."""
+        if employee.is_manager:
+            return MANAGER_SHIFT_LENGTHS
+        return REGULAR_SHIFT_LENGTHS
     
     def _find_valid_shift_time(
         self,
@@ -299,14 +319,13 @@ class ScheduleSolver:
         return True
     
     def _score_shift(self, shift: Shift, employee: Employee, department_id: int) -> float:
-        ###### TO DO: ENHANCE SCORING WITH MORE FACTORS ######
         """
         Score a potential shift assignment. Higher = better.
         
         Factors:
         - Preference for primary department
         - Preference for PREFERRED availability
-        - Preference for 8h shifts
+        - Preference for standard shift lengths (4, 6, 8, 10)
         - Penalty for overtime (exceeding contracted hours)
         - Preference for employees with hours still needed
         - Bonus for departments with higher min_staff requirements
@@ -340,16 +359,21 @@ class ScheduleSolver:
         elif avail == AvailabilityType.AVAILABLE:
             score += 5
         
-        # Shift length scoring (prefer 8h)
+        # Shift length scoring - prefer standard lengths
         length = shift.duration_hours
-        if length == 8:
-            score += 10
-        elif length == 4:
-            score += 7
-        elif length == 6:
-            score += 5
-        elif length == 10:
-            score += 3
+        if length in STANDARD_SHIFT_LENGTHS:
+            # Standard lengths get bonus based on preference
+            if length == 8:
+                score += 10
+            elif length == 6:
+                score += 8
+            elif length == 4:
+                score += 7
+            elif length == 10:
+                score += 5
+        else:
+            # Non-standard lengths (5, 7, 9, 11, 12) - small penalty
+            score += 2
         
         # Hours needed - prefer assigning to those who need hours
         current_hours = self.employee_hours[employee.id]
@@ -379,10 +403,33 @@ class ScheduleSolver:
         self.employee_hours[shift.employee_id] += shift.duration_hours
         self.employee_days[shift.employee_id].add(shift.day_of_week)
     
+    def _remove_shift(self, shift: Shift):
+        """Remove a shift from the schedule and update tracking."""
+        self.shifts.remove(shift)
+        self.employee_hours[shift.employee_id] -= shift.duration_hours
+        # Only remove day if no other shifts that day
+        other_shifts_same_day = any(
+            s.employee_id == shift.employee_id and s.day_of_week == shift.day_of_week
+            for s in self.shifts
+        )
+        if not other_shifts_same_day:
+            self.employee_days[shift.employee_id].discard(shift.day_of_week)
+    
+    def _replace_shift(self, old_shift: Shift, new_shift: Shift):
+        """Replace an existing shift with a new one (e.g., extended version)."""
+        self._remove_shift(old_shift)
+        self._add_shift(new_shift)
+    
     def _satisfy_role_requirements(self):
-        """2: Ensure keyholder/manager requirements are met."""
+        """Phase 2: Ensure keyholder/manager requirements are met."""
         
-        for req in self.context.role_requirements:
+        # Sort role requirements by time (earlier first)
+        sorted_reqs = sorted(
+            self.context.role_requirements,
+            key=lambda r: (r.start_time, r.day_of_week or 0)
+        )
+        
+        for req in sorted_reqs:
             self._satisfy_single_role_requirement(req)
     
     def _satisfy_single_role_requirement(self, req: RoleRequirement):
@@ -396,7 +443,7 @@ class ScheduleSolver:
             window_start = datetime.combine(slot_date, req.start_time)
             window_end = datetime.combine(slot_date, req.end_time)
             
-            # Check at intervals
+            # Check at intervals through the window
             interval = timedelta(minutes=30)
             current = window_start
             
@@ -406,12 +453,116 @@ class ScheduleSolver:
                 )
                 
                 if not is_met:
-                    # Need to add a keyholder/manager
-                    shift = self._find_role_shift(req, current, window_start, window_end, day)
-                    if shift:
-                        self._add_shift(shift)
+                    # Try to satisfy: first try extending existing shifts, then add new
+                    satisfied = self._try_extend_shift_for_role(req, current, window_start, window_end, day)
+                    
+                    if not satisfied:
+                        # Need to add a new keyholder/manager shift
+                        shift = self._find_role_shift(req, current, window_start, window_end, day)
+                        if shift:
+                            self._add_shift(shift)
                 
                 current += interval
+    
+    def _try_extend_shift_for_role(
+        self,
+        req: RoleRequirement,
+        target_time: datetime,
+        window_start: datetime,
+        window_end: datetime,
+        day_of_week: int
+    ) -> bool:
+        """
+        Try to extend an existing keyholder/manager shift to cover the target time.
+        Returns True if successful.
+        """
+        emp_map = {e.id: e for e in self.context.employees}
+        
+        # Find shifts on this day by employees with the required role
+        candidates = []
+        for shift in self.shifts:
+            if shift.day_of_week != day_of_week:
+                continue
+            
+            emp = emp_map.get(shift.employee_id)
+            if not emp:
+                continue
+            
+            # Check if employee has required role
+            if req.requires_keyholder and not emp.is_keyholder:
+                continue
+            if req.requires_manager and not emp.is_manager:
+                continue
+            
+            candidates.append((shift, emp))
+        
+        # Sort by how close the shift is to the target time
+        candidates.sort(key=lambda x: abs((x[0].start_datetime - target_time).total_seconds()))
+        
+        for shift, emp in candidates:
+            # Skip if employee already significantly over hours
+            current_hours = self.employee_hours[emp.id]
+            if current_hours >= emp.contracted_weekly_hours + 4:
+                continue
+            
+            # Calculate how much we need to extend
+            if target_time < shift.start_datetime:
+                # Need to extend start earlier - round down to whole hour
+                new_start = target_time.replace(minute=0, second=0, microsecond=0)
+                new_end = shift.end_datetime
+            elif target_time >= shift.end_datetime:
+                # Need to extend end later - round up to whole hour
+                new_end = (target_time + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+                new_start = shift.start_datetime
+            else:
+                # Target time is already covered by this shift - shouldn't happen
+                continue
+            
+            # Ensure start time is also on the hour
+            if new_start.minute != 0:
+                new_start = new_start.replace(minute=0)
+            if new_end.minute != 0:
+                new_end = (new_end + timedelta(hours=1)).replace(minute=0)
+            
+            # Check if new duration is valid
+            new_duration = (new_end - new_start).total_seconds() / 3600
+            max_hours = MAX_MANAGER_HOURS if emp.is_manager else MAX_REGULAR_HOURS
+            
+            if new_duration > max_hours:
+                continue
+            
+            if new_duration < MIN_SHIFT_HOURS:
+                continue
+            
+            # Check if extended shift would put employee too far over hours
+            extension_hours = new_duration - shift.duration_hours
+            if current_hours + extension_hours > emp.contracted_weekly_hours + 4:
+                continue
+            
+            # Check if employee can work the extended time
+            can_work, _ = can_employee_work_shift(
+                emp,
+                new_start,
+                new_end,
+                shift.department_id,
+                self.context.availability_rules,
+                self.context.time_off_requests,
+                [s for s in self.shifts if s != shift],  # Exclude current shift
+            )
+            
+            if can_work:
+                # Create extended shift
+                new_shift = Shift(
+                    employee_id=shift.employee_id,
+                    store_id=shift.store_id,
+                    department_id=shift.department_id,
+                    start_datetime=new_start,
+                    end_datetime=new_end,
+                )
+                self._replace_shift(shift, new_shift)
+                return True
+        
+        return False
     
     def _find_role_shift(
         self,
@@ -438,6 +589,11 @@ class ScheduleSolver:
         scored_options: list[tuple[float, Shift, Employee]] = []
         
         for emp in candidates:
+            # Skip if already significantly over contracted hours
+            current_hours = self.employee_hours[emp.id]
+            if current_hours >= emp.contracted_weekly_hours + 4:
+                continue
+            
             # Skip if already working this day
             if day_of_week in self.employee_days[emp.id]:
                 # Check if existing shift covers the time
@@ -463,7 +619,7 @@ class ScheduleSolver:
             if not dept_id:
                 continue
             
-            allowed_lengths = MANAGER_SHIFT_LENGTHS if emp.is_manager else NON_MANAGER_SHIFT_LENGTHS
+            allowed_lengths = self._get_allowed_shift_lengths(emp)
             
             for length in allowed_lengths:
                 shift = self._find_valid_shift_time(
@@ -483,7 +639,7 @@ class ScheduleSolver:
         return scored_options[0][1]
     
     def _fill_contracted_hours(self):
-        """3: Assign additional shifts to meet contracted hours."""
+        """Phase 3: Assign additional shifts to meet contracted hours."""
         
         # Multiple passes to ensure we fill hours
         for _ in range(3):
@@ -505,7 +661,7 @@ class ScheduleSolver:
     def _fill_employee_hours(self, employee: Employee, needed: float):
         """Try to fill an employee's contracted hours with additional shifts."""
         
-        allowed_lengths = MANAGER_SHIFT_LENGTHS if employee.is_manager else NON_MANAGER_SHIFT_LENGTHS
+        allowed_lengths = self._get_allowed_shift_lengths(employee)
         
         # Try to add shifts on days they're not working
         for day in range(7):
@@ -521,7 +677,11 @@ class ScheduleSolver:
                 continue
             
             # Try each shift length, preferring longer shifts to fill hours faster
+            # But cap at what's needed to avoid excessive overtime
             for length in sorted(allowed_lengths, reverse=True):
+                if length > needed + 2:  # Allow small overage but not excessive
+                    continue
+                    
                 shift = self._find_open_shift(employee, target_date, length)
                 if shift:
                     self._add_shift(shift)
@@ -574,7 +734,7 @@ class ScheduleSolver:
         return None
     
     def _build_result(self) -> ScheduleResult:
-        """4: Build the final result with any unmet constraints."""
+        """Phase 5: Build the final result with any unmet constraints."""
         
         from .constraints import validate_schedule
         
