@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .data_loader import load_schedule_context
 from .solver import solve_schedule
+from .or_solver import solve_schedule as or_solve_schedule
 from .types import ScheduleContext, ScheduleResult
 
 
@@ -60,7 +61,7 @@ def generate_schedule(
     context = load_schedule_context(db, store_id, week_start)
     
     # Run solver
-    result = solve_schedule(context)
+    result = or_solve_schedule(context)
     
     return result
 
@@ -78,4 +79,4 @@ def generate_schedule_from_context(context: ScheduleContext) -> ScheduleResult:
     Returns:
         ScheduleResult with generated shifts
     """
-    return solve_schedule(context)
+    return or_solve_schedule(context)
