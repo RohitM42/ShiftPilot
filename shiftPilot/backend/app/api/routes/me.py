@@ -1,33 +1,30 @@
+# app/api/routes/me.py
+
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, get_current_employee
 from app.db.models.users import Users
 from app.db.models.employees import Employees
 from app.db.models.shifts import Shifts
 from app.db.models.availability_rules import AvailabilityRules
 from app.db.models.time_off_requests import TimeOffRequests
 from app.db.models.employee_departments import EmployeeDepartments
+from app.db.models.ai_inputs import AIInputs
+from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
+from app.db.models.ai_proposals import AIProposals, ProposalStatus
 from app.schemas.shifts import ShiftResponse
 from app.schemas.availability_rules import AvailabilityRuleResponse
 from app.schemas.time_off_requests import TimeOffRequestResponse
 from app.schemas.employee_departments import EmployeeDepartmentResponse
 from app.schemas.employees import EmployeeResponse
+from app.schemas.ai_inputs import AIInputResponse
+from app.schemas.ai_outputs import AIOutputResponse
+from app.schemas.ai_proposals import AIProposalResponse
 
 router = APIRouter(prefix="/me", tags=["me"])
-
-
-def get_current_employee(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-) -> Employees:
-    """Helper to get employee record for current user"""
-    employee = db.query(Employees).filter(Employees.user_id == current_user.id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="No employee record found for current user")
-    return employee
 
 
 @router.get("/employee", response_model=EmployeeResponse)
@@ -87,3 +84,80 @@ def get_my_departments(
 ):
     """Get departments current user is assigned to"""
     return db.query(EmployeeDepartments).filter(EmployeeDepartments.employee_id == employee.id).all()
+
+
+# AI Inputs
+@router.get("/ai-inputs", response_model=List[AIInputResponse])
+def get_my_ai_inputs(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get current user's AI inputs"""
+    return db.query(AIInputs).filter(
+        AIInputs.req_by_user_id == current_user.id
+    ).order_by(AIInputs.created_at.desc()).offset(skip).limit(limit).all()
+
+
+# AI Outputs
+@router.get("/ai-outputs", response_model=List[AIOutputResponse])
+def get_my_ai_outputs(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get AI outputs affecting current user or from their inputs"""
+    my_input_ids = db.query(AIInputs.id).filter(
+        AIInputs.req_by_user_id == current_user.id
+    ).subquery()
+    
+    return db.query(AIOutputs).filter(
+        (AIOutputs.affects_user_id == current_user.id) | 
+        (AIOutputs.input_id.in_(my_input_ids))
+    ).order_by(AIOutputs.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/ai-outputs/pending-clarification", response_model=List[AIOutputResponse])
+def get_my_pending_clarification(
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get current user's outputs needing clarification"""
+    my_input_ids = db.query(AIInputs.id).filter(
+        AIInputs.req_by_user_id == current_user.id
+    ).subquery()
+    
+    return db.query(AIOutputs).filter(
+        AIOutputs.status == AIOutputStatus.NEEDS_CLARIFICATION,
+        (AIOutputs.affects_user_id == current_user.id) | 
+        (AIOutputs.input_id.in_(my_input_ids))
+    ).order_by(AIOutputs.created_at.asc()).all()
+
+
+# AI Proposals
+@router.get("/ai-proposals", response_model=List[AIProposalResponse])
+def get_my_ai_proposals(
+    status_filter: Optional[ProposalStatus] = Query(None, alias="status"),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get current user's AI proposals"""
+    my_input_ids = db.query(AIInputs.id).filter(
+        AIInputs.req_by_user_id == current_user.id
+    ).subquery()
+    
+    my_output_ids = db.query(AIOutputs.id).filter(
+        (AIOutputs.affects_user_id == current_user.id) | 
+        (AIOutputs.input_id.in_(my_input_ids))
+    ).subquery()
+    
+    query = db.query(AIProposals).filter(AIProposals.ai_output_id.in_(my_output_ids))
+    
+    if status_filter:
+        query = query.filter(AIProposals.status == status_filter)
+    
+    return query.order_by(AIProposals.created_at.desc()).offset(skip).limit(limit).all()

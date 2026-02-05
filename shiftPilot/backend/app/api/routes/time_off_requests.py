@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, is_manager_or_admin, get_employee_for_user
 from app.db.models.time_off_requests import TimeOffRequests, TimeOffStatus
 from app.db.models.employees import Employees
 from app.db.models.users import Users
@@ -10,20 +10,6 @@ from app.db.models.user_roles import UserRoles, Role
 from app.schemas.time_off_requests import TimeOffRequestCreate, TimeOffRequestUpdate, TimeOffRequestResponse
 
 router = APIRouter(prefix="/time-off-requests", tags=["time-off-requests"])
-
-
-def is_manager_or_admin(db: Session, user: Users) -> bool:
-    """Check if user has manager or admin role"""
-    role = db.query(UserRoles).filter(
-        UserRoles.user_id == user.id,
-        UserRoles.role.in_([Role.ADMIN, Role.MANAGER])
-    ).first()
-    return role is not None
-
-
-def get_employee_for_user(db: Session, user: Users) -> Optional[Employees]:
-    """Get employee record for a user"""
-    return db.query(Employees).filter(Employees.user_id == user.id).first()
 
 
 @router.post("", response_model=TimeOffRequestResponse, status_code=status.HTTP_201_CREATED)

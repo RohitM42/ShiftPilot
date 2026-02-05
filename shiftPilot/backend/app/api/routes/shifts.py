@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.api.deps import get_db, get_current_user, require_manager_or_admin
+from app.api.deps import get_db, get_current_user, require_manager_or_admin, check_store_access, get_accessible_store_ids
 from app.db.models.shifts import Shifts
 from app.db.models.stores import Stores
 from app.db.models.departments import Departments
@@ -13,49 +13,6 @@ from app.db.models.user_roles import UserRoles, Role
 from app.schemas.shifts import ShiftCreate, ShiftUpdate, ShiftResponse
 
 router = APIRouter(prefix="/shifts", tags=["shifts"])
-
-
-def check_store_access(db: Session, user: Users, store_id: int) -> bool:
-    """Check if user has manager/admin access to a specific store"""
-    # global admin can access any store
-    global_admin = db.query(UserRoles).filter(
-        UserRoles.user_id == user.id,
-        UserRoles.role == Role.ADMIN,
-        UserRoles.store_id.is_(None)
-    ).first()
-    if global_admin:
-        return True
-    
-    # store-level admin or manager
-    store_role = db.query(UserRoles).filter(
-        UserRoles.user_id == user.id,
-        UserRoles.store_id == store_id,
-        UserRoles.role.in_([Role.ADMIN, Role.MANAGER])
-    ).first()
-    return store_role is not None
-
-
-def get_accessible_store_ids(db: Session, user: Users) -> Optional[List[int]]:
-    """
-    Returns list of store IDs user can access, or None if global admin (all stores).
-    """
-    # global admin can access all
-    global_admin = db.query(UserRoles).filter(
-        UserRoles.user_id == user.id,
-        UserRoles.role == Role.ADMIN,
-        UserRoles.store_id.is_(None)
-    ).first()
-    if global_admin:
-        return None  # None means all stores
-    
-    # get store IDs where user has manager/admin role
-    roles = db.query(UserRoles).filter(
-        UserRoles.user_id == user.id,
-        UserRoles.role.in_([Role.ADMIN, Role.MANAGER]),
-        UserRoles.store_id.isnot(None)
-    ).all()
-    
-    return [r.store_id for r in roles]
 
 
 @router.post("", response_model=ShiftResponse, status_code=status.HTTP_201_CREATED)
