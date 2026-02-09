@@ -9,6 +9,7 @@ from app.db.models.ai_proposals import AIProposals, ProposalStatus, ProposalType
 from app.db.models.users import Users
 from app.db.models.user_roles import UserRoles, Role
 from app.schemas.ai_proposals import AIProposalCreate, AIProposalUpdate, AIProposalResponse
+from app.services.ai import apply_proposal, ApprovalError
 
 router = APIRouter(prefix="/ai-proposals", tags=["ai-proposals"])
 
@@ -119,7 +120,7 @@ def approve_proposal(
     db: Session = Depends(get_db),
     current_user: Users = Depends(require_manager_or_admin),
 ):
-    """Approve proposal - manager (AVAILABILITY only) or admin (any type)"""
+    """Approve proposal and apply changes - manager (AVAILABILITY only) or admin (any type)"""
     proposal = db.query(AIProposals).filter(AIProposals.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="AI proposal not found")
@@ -131,10 +132,14 @@ def approve_proposal(
     if proposal.type != ProposalType.AVAILABILITY and not is_admin(db, current_user):
         raise HTTPException(status_code=403, detail="Admin access required for this proposal type")
     
+    # Apply the changes to constraint tables
+    try:
+        apply_proposal(db, proposal, current_user.id)
+    except ApprovalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     proposal.status = ProposalStatus.APPROVED
     proposal.last_actioned_by = current_user.id
-    
-    # TODO: Apply the actual changes to the relevant table (availability, coverage, etc.)
     
     db.commit()
     db.refresh(proposal)

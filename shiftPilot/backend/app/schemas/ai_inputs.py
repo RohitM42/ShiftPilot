@@ -9,7 +9,8 @@ class AIInputBase(BaseModel):
 
 
 class AIInputCreate(AIInputBase):
-    req_by_user_id: int
+    """req_by_user_id is set from the authenticated user, not the payload"""
+    pass
 
 
 class AIInputResponse(AIInputBase):

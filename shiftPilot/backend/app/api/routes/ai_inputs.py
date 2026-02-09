@@ -4,32 +4,43 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user, require_admin, require_manager_or_admin, is_manager_or_admin
 from app.db.models.ai_inputs import AIInputs
+from app.db.models.ai_outputs import AIOutputStatus
 from app.db.models.users import Users
 from app.db.models.user_roles import UserRoles, Role
 from app.schemas.ai_inputs import AIInputCreate, AIInputResponse
+from app.schemas.ai_outputs import AIOutputResponse
+from app.services.ai import process_ai_input
 
 router = APIRouter(prefix="/ai-inputs", tags=["ai-inputs"])
 
 
-@router.post("", response_model=AIInputResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AIOutputResponse, status_code=status.HTTP_201_CREATED)
 def create_ai_input(
     payload: AIInputCreate,
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
-    """Create AI input - any authenticated user can create"""
+    """Create AI input and process it through the AI service.
+    Returns the AI output (which contains the parsed intent and proposal reference).
+    """
     ai_input = AIInputs(
         req_by_user_id=current_user.id,
         input_text=payload.input_text,
         context_tables=payload.context_tables,
     )
     db.add(ai_input)
-    db.commit()
-    db.refresh(ai_input)
-    
-    # TO DO: Call LLM processing here, create AIOutput
-    
-    return ai_input
+    db.flush()  # get id before processing
+
+    try:
+        ai_output = process_ai_input(db, ai_input, current_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI processing failed: {str(e)}",
+        )
+
+    return ai_output
 
 
 @router.get("/unprocessed", response_model=List[AIInputResponse])
