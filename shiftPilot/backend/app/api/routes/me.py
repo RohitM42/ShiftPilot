@@ -23,8 +23,18 @@ from app.schemas.employees import EmployeeResponse
 from app.schemas.ai_inputs import AIInputResponse
 from app.schemas.ai_outputs import AIOutputResponse
 from app.schemas.ai_proposals import AIProposalResponse
+from app.schemas.user_roles import UserRoleResponse
+from app.db.models.user_roles import UserRoles
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+@router.get("/roles", response_model=List[UserRoleResponse])
+def get_my_roles(
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get current user's roles"""
+    return db.query(UserRoles).filter(UserRoles.user_id == current_user.id).all()
 
 
 @router.get("/employee", response_model=EmployeeResponse)
