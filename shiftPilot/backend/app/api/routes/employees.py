@@ -67,16 +67,26 @@ def list_employees(
     ]
 
 
-@router.get("/{employee_id}", response_model=EmployeeResponse)
+@router.get("/{employee_id}", response_model=EmployeeWithUserResponse)
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
     current_user: Users = Depends(require_manager_or_admin),
 ):
-    employee = db.query(Employees).filter(Employees.id == employee_id).first()
-    if not employee:
+    # Join with users table to include name/email in response
+    result = db.query(Employees, Users.firstname, Users.surname, Users.email).join(
+        Users, Employees.user_id == Users.id
+    ).filter(Employees.id == employee_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
+
+    emp, firstname, surname, email = result
+    return EmployeeWithUserResponse(
+        **{c.key: getattr(emp, c.key) for c in Employees.__table__.columns},
+        firstname=firstname,
+        surname=surname,
+        email=email,
+    )
 
 
 @router.put("/{employee_id}", response_model=EmployeeResponse)

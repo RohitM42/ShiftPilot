@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Search, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { cn } from "@/lib/utils";
 import api from "@/services/api";
 import { EmploymentStatus } from "@/types";
 import type {
@@ -48,6 +48,7 @@ const STATUS_LABEL: Record<EmploymentStatus, string> = {
 
 export default function EmployeeManagement() {
   const { isAdmin, employee: currentEmployee } = useAuth();
+  const navigate = useNavigate();
 
   const [employees, setEmployees] = useState<EmployeeWithUser[]>([]);
   const [empDepts, setEmpDepts] = useState<Map<number, EmployeeDepartmentResponse[]>>(new Map());
@@ -274,7 +275,12 @@ export default function EmployeeManagement() {
                   </div>
                 </div>
 
-                <Button variant="ghost" size="sm" className="shrink-0 gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  onClick={() => navigate(`/employees/${emp.id}/edit`)}
+                >
                   <Pencil size={14} />
                   <span className="hidden sm:inline">Edit</span>
                 </Button>

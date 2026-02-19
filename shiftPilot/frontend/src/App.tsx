@@ -9,6 +9,7 @@ import MyAvailability from "@/pages/MyAvailability";
 import SchedulingRules from "@/pages/SchedulingRules";
 import ProposalReview from "@/pages/ProposalReview";
 import EmployeeManagement from "@/pages/EmployeeManagement";
+import EmployeeEdit from "@/pages/EmployeeEdit";
 
 function LoginGuard() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -55,6 +56,14 @@ export default function App() {
               element={
                 <ProtectedRoute requireManagerOrAdmin>
                   <EmployeeManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="employees/:id/edit"
+              element={
+                <ProtectedRoute requireManagerOrAdmin>
+                  <EmployeeEdit />
                 </ProtectedRoute>
               }
             />
