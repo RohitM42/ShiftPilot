@@ -37,6 +37,7 @@ export const authApi = {
 // Me
 export const meApi = {
   getUser: () => api.get("/users/me"),
+  getRoles: () => api.get("/me/roles"),
   getEmployee: () => api.get("/me/employee"),
   getShifts: (params?: { start_date?: string; end_date?: string }) =>
     api.get("/me/shifts", { params }),

@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const user: UserResponse = userRes.data;
 
-      const rolesResult = await userRolesApi.getForUser(user.id).catch(() => null);
+      const rolesResult = await meApi.getRoles().catch(() => null);
       const roles: UserRoleResponse[] = rolesResult?.data ?? [];
 
       let employee: EmployeeResponse | null = null;
