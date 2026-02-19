@@ -34,3 +34,9 @@ class EmployeeResponse(EmployeeBase):
 
     class Config:
         from_attributes = True
+
+
+class EmployeeWithUserResponse(EmployeeResponse):
+    firstname: str
+    surname: str
+    email: str
