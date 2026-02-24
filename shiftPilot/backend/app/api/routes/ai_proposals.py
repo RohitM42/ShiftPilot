@@ -75,6 +75,47 @@ def list_pending_proposals_by_store(
     return query.order_by(AIProposals.created_at.asc()).offset(skip).limit(limit).all()
 
 
+@router.get("/store/{store_id}", response_model=List[AIProposalResponse])
+def list_proposals_by_store(
+    store_id: int,
+    status_filter: Optional[ProposalStatus] = Query(None, alias="status"),
+    type: Optional[ProposalType] = Query(None),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(require_manager_or_admin),
+):
+    """List all proposals for a store (any status) - manager/admin only"""
+    query = db.query(AIProposals).filter(AIProposals.store_id == store_id)
+
+    if status_filter:
+        query = query.filter(AIProposals.status == status_filter)
+    if type:
+        query = query.filter(AIProposals.type == type)
+
+    return query.order_by(AIProposals.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/all", response_model=List[AIProposalResponse])
+def list_all_proposals(
+    status_filter: Optional[ProposalStatus] = Query(None, alias="status"),
+    type: Optional[ProposalType] = Query(None),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(require_manager_or_admin),
+):
+    """List all proposals (any status, any store) - manager/admin only"""
+    query = db.query(AIProposals)
+
+    if status_filter:
+        query = query.filter(AIProposals.status == status_filter)
+    if type:
+        query = query.filter(AIProposals.type == type)
+
+    return query.order_by(AIProposals.created_at.desc()).offset(skip).limit(limit).all()
+
+
 @router.get("/user/{user_id}", response_model=List[AIProposalResponse])
 def list_proposals_by_affected_user(
     user_id: int,

@@ -56,6 +56,97 @@ def _parse_time(t: Optional[str]) -> Optional[time]:
     return time(int(parts[0]), int(parts[1]))
 
 
+def _times_overlap(
+    new_start: Optional[time],
+    new_end: Optional[time],
+    ex_start: Optional[time],
+    ex_end: Optional[time],
+) -> bool:
+    """Return True if two time ranges overlap. None means all-day (00:00–24:00)."""
+    # Represent all-day as 0 and 1440 minutes for comparison
+    ns = 0 if new_start is None else new_start.hour * 60 + new_start.minute
+    ne = 1440 if new_end is None else new_end.hour * 60 + new_end.minute
+    es = 0 if ex_start is None else ex_start.hour * 60 + ex_start.minute
+    ee = 1440 if ex_end is None else ex_end.hour * 60 + ex_end.minute
+    return ns < ee and ne > es
+
+
+def _resolve_conflicts(
+    db: Session,
+    employee_id: int,
+    day: int,
+    new_start: Optional[time],
+    new_end: Optional[time],
+) -> None:
+    """
+    For every active rule on this day that overlaps the new time range,
+    trim, split, or deactivate it so there are no overlapping windows.
+    """
+    existing = db.query(AvailabilityRules).filter(
+        AvailabilityRules.employee_id == employee_id,
+        AvailabilityRules.day_of_week == day,
+        AvailabilityRules.active == True,
+    ).all()
+
+    ns = 0 if new_start is None else new_start.hour * 60 + new_start.minute
+    ne = 1440 if new_end is None else new_end.hour * 60 + new_end.minute
+
+    for ex in existing:
+        es = 0 if ex.start_time_local is None else ex.start_time_local.hour * 60 + ex.start_time_local.minute
+        ee = 1440 if ex.end_time_local is None else ex.end_time_local.hour * 60 + ex.end_time_local.minute
+
+        if not (ns < ee and ne > es):
+            continue  # no overlap
+
+        # New rule completely covers existing → deactivate
+        if ns <= es and ne >= ee:
+            ex.active = False
+
+        # New rule overlaps only the start of existing → trim start forward
+        elif ns <= es and ne < ee:
+            ex.active = False
+            db.add(AvailabilityRules(
+                employee_id=employee_id,
+                day_of_week=day,
+                start_time_local=new_end,
+                end_time_local=ex.end_time_local,
+                rule_type=ex.rule_type,
+                active=True,
+            ))
+
+        # New rule overlaps only the end of existing → trim end backward
+        elif ns > es and ne >= ee:
+            ex.active = False
+            db.add(AvailabilityRules(
+                employee_id=employee_id,
+                day_of_week=day,
+                start_time_local=ex.start_time_local,
+                end_time_local=new_start,
+                rule_type=ex.rule_type,
+                active=True,
+            ))
+
+        # New rule is inside existing → split into two
+        else:
+            ex.active = False
+            db.add(AvailabilityRules(
+                employee_id=employee_id,
+                day_of_week=day,
+                start_time_local=ex.start_time_local,
+                end_time_local=new_start,
+                rule_type=ex.rule_type,
+                active=True,
+            ))
+            db.add(AvailabilityRules(
+                employee_id=employee_id,
+                day_of_week=day,
+                start_time_local=new_end,
+                end_time_local=ex.end_time_local,
+                rule_type=ex.rule_type,
+                active=True,
+            ))
+
+
 def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> None:
     """Apply availability rule changes."""
     employee_id = result["employee_id"]
@@ -69,18 +160,18 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
         rule_type = AvailabilityRuleType(change["rule_type"])
 
         if action == "ADD":
-            rule = AvailabilityRules(
+            # Resolve any overlapping existing rules before inserting
+            _resolve_conflicts(db, employee_id, day, start, end)
+            db.add(AvailabilityRules(
                 employee_id=employee_id,
                 day_of_week=day,
                 start_time_local=start,
                 end_time_local=end,
                 rule_type=rule_type,
                 active=True,
-            )
-            db.add(rule)
+            ))
 
         elif action == "REMOVE":
-            # Find matching active rules and deactivate
             query = db.query(AvailabilityRules).filter(
                 AvailabilityRules.employee_id == employee_id,
                 AvailabilityRules.day_of_week == day,
@@ -91,29 +182,20 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
                     AvailabilityRules.start_time_local == start,
                     AvailabilityRules.end_time_local == end,
                 )
-            rules = query.all()
-            for r in rules:
-                r.active = False
-
-        elif action == "UPDATE":
-            # Deactivate existing rules for this day/time and add new one
-            query = db.query(AvailabilityRules).filter(
-                AvailabilityRules.employee_id == employee_id,
-                AvailabilityRules.day_of_week == day,
-                AvailabilityRules.active == True,
-            )
             for r in query.all():
                 r.active = False
 
-            rule = AvailabilityRules(
+        elif action == "UPDATE":
+            # UPDATE replaces all rules for the day — resolve conflicts then insert
+            _resolve_conflicts(db, employee_id, day, start, end)
+            db.add(AvailabilityRules(
                 employee_id=employee_id,
                 day_of_week=day,
                 start_time_local=start,
                 end_time_local=end,
                 rule_type=rule_type,
                 active=True,
-            )
-            db.add(rule)
+            ))
 
 
 def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None:

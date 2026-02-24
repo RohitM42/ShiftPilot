@@ -63,6 +63,10 @@ export const aiProposalsApi = {
     api.get(`/ai-proposals/pending/store/${storeId}`, {
       params: type ? { type } : {},
     }),
+  getByStore: (storeId: number, params?: { status?: string; type?: string }) =>
+    api.get(`/ai-proposals/store/${storeId}`, { params }),
+  getAll: (params?: { status?: string; type?: string }) =>
+    api.get("/ai-proposals/all", { params }),
   approve: (id: number) => api.patch(`/ai-proposals/${id}/approve`),
   reject: (id: number, rejection_reason?: string) =>
     api.patch(`/ai-proposals/${id}/reject`, null, {
