@@ -27,12 +27,18 @@ def apply_proposal(db: Session, proposal: AIProposals, approved_by_user_id: int)
     """
     Apply an approved proposal's changes to the relevant constraint table.
     Called after proposal status is set to APPROVED.
+    Supports both AI proposals (via ai_output.result_json) and manual proposals (via proposal.changes_json).
     """
-    output = db.query(AIOutputs).filter(AIOutputs.id == proposal.ai_output_id).first()
-    if not output:
-        raise ApprovalError("AI output not found for proposal")
+    if proposal.ai_output_id:
+        output = db.query(AIOutputs).filter(AIOutputs.id == proposal.ai_output_id).first()
+        if not output:
+            raise ApprovalError("AI output not found for proposal")
+        result = output.result_json
+    elif proposal.changes_json:
+        result = proposal.changes_json
+    else:
+        raise ApprovalError("Proposal has no changes to apply")
 
-    result = output.result_json
     intent_type = result.get("intent_type")
 
     handlers = {

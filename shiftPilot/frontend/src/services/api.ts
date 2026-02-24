@@ -73,6 +73,8 @@ export const aiProposalsApi = {
       params: rejection_reason ? { rejection_reason } : {},
     }),
   cancel: (id: number) => api.patch(`/ai-proposals/${id}/cancel`),
+  proposeManual: (changes: object[], summary: string) =>
+    api.post("/ai-proposals/propose/manual", { changes, summary }),
 };
 
 // Availability Rules

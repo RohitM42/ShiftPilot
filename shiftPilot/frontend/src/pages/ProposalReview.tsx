@@ -135,6 +135,11 @@ function ProposalCard({
           >
             {TYPE_LABEL[proposal.type]}
           </span>
+          {(proposal as AIProposalResponse & { source?: string }).source === "MANUAL" && (
+            <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 border-slate-200">
+              Manual
+            </span>
+          )}
           <Badge variant={STATUS_VARIANT[proposal.status]}>{proposal.status}</Badge>
           <span className="text-xs text-muted-foreground">#{proposal.id}</span>
         </div>
@@ -266,42 +271,56 @@ export default function ProposalReview() {
             let affectedUserName: string | undefined;
             let requestedByName: string | undefined;
 
-            // Fetch linked ai_output for summary + affects_user_id
-            try {
-              const outRes = await api.get(`/ai-outputs/${p.ai_output_id}`);
-              summary = outRes.data.summary;
-              affects_user_id = outRes.data.affects_user_id;
-            } catch {}
+            const isManual = !p.ai_output_id;
 
-            // Resolve affected user name
-            if (affects_user_id) {
-              try {
-                const empRes = await api.get("/employees", {
-                  params: { store_id: p.store_id },
-                });
-                const match = empRes.data.find(
-                  (e: { user_id: number; firstname: string; surname: string }) =>
-                    e.user_id === affects_user_id
-                );
-                if (match) affectedUserName = `${match.firstname} ${match.surname}`;
-              } catch {}
-            }
-
-            // Resolve requested-by name (non-availability only — shown conditionally in card)
-            if (p.type !== ProposalType.AVAILABILITY) {
+            if (isManual) {
+              // Manual proposal — read directly from changes_json
+              const cj = (p as AIProposalResponse & { changes_json?: { summary?: string; employee_id?: number } }).changes_json;
+              summary = cj?.summary;
+              // For manual proposals we need to resolve the affected employee via changes_json.employee_id
+              if (cj?.employee_id) {
+                try {
+                  const empRes = await api.get("/employees", { params: { store_id: p.store_id } });
+                  const match = empRes.data.find(
+                    (e: { id: number; firstname: string; surname: string }) => e.id === cj.employee_id
+                  );
+                  if (match) affectedUserName = `${match.firstname} ${match.surname}`;
+                } catch {}
+              }
+            } else {
+              // AI proposal — fetch ai_output for summary + affects_user_id
               try {
                 const outRes = await api.get(`/ai-outputs/${p.ai_output_id}`);
-                const inputRes = await api.get(`/ai-inputs/${outRes.data.input_id}`);
-                const reqUserId = inputRes.data.req_by_user_id;
-                const empRes = await api.get("/employees", {
-                  params: { store_id: p.store_id },
-                });
-                const match = empRes.data.find(
-                  (e: { user_id: number; firstname: string; surname: string }) =>
-                    e.user_id === reqUserId
-                );
-                if (match) requestedByName = `${match.firstname} ${match.surname}`;
+                summary = outRes.data.summary;
+                affects_user_id = outRes.data.affects_user_id;
               } catch {}
+
+              // Resolve affected user name
+              if (affects_user_id) {
+                try {
+                  const empRes = await api.get("/employees", { params: { store_id: p.store_id } });
+                  const match = empRes.data.find(
+                    (e: { user_id: number; firstname: string; surname: string }) =>
+                      e.user_id === affects_user_id
+                  );
+                  if (match) affectedUserName = `${match.firstname} ${match.surname}`;
+                } catch {}
+              }
+
+              // Resolve requested-by name (non-availability only)
+              if (p.type !== ProposalType.AVAILABILITY) {
+                try {
+                  const outRes = await api.get(`/ai-outputs/${p.ai_output_id}`);
+                  const inputRes = await api.get(`/ai-inputs/${outRes.data.input_id}`);
+                  const reqUserId = inputRes.data.req_by_user_id;
+                  const empRes = await api.get("/employees", { params: { store_id: p.store_id } });
+                  const match = empRes.data.find(
+                    (e: { user_id: number; firstname: string; surname: string }) =>
+                      e.user_id === reqUserId
+                  );
+                  if (match) requestedByName = `${match.firstname} ${match.surname}`;
+                } catch {}
+              }
             }
 
             return { ...p, summary, affects_user_id, affectedUserName, requestedByName };

@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
-import { Send, Pencil, Loader2 } from "lucide-react";
+import { Send, Pencil, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { meApi, aiInputsApi } from "@/services/api";
+import { meApi, aiInputsApi, aiProposalsApi } from "@/services/api";
+import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { AvailabilityRuleType, ProposalType, ProposalStatus } from "@/types";
 import type { AvailabilityRuleResponse, AIProposalResponse } from "@/types";
@@ -49,9 +50,7 @@ const PROPOSAL_STATUS_VARIANT: Record<ProposalStatus, "default" | "success" | "d
 // ── Time formatting ──────────────────────────────────────────────────
 
 const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-  }).format(new Date(2000, 0, 1, 13));
+  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(new Date(2000, 0, 1, 13));
   return formatted.includes("13");
 })();
 
@@ -91,18 +90,278 @@ interface ParsedRule {
   isFullDay: boolean;
 }
 
+interface EnrichedProposal extends AIProposalResponse {
+  summary?: string;
+}
+
+
+// ── Manual Edit Modal ────────────────────────────────────────────────
+
+const DAY_LABELS_FULL_MODAL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const RULE_TYPE_OPTIONS = [
+  { value: AvailabilityRuleType.AVAILABLE, label: "Available" },
+  { value: AvailabilityRuleType.UNAVAILABLE, label: "Unavailable" },
+  { value: AvailabilityRuleType.PREFERRED, label: "Preferred" },
+];
+
+interface ManualChange {
+  day_of_week: number;
+  start_time: string | null;
+  end_time: string | null;
+  rule_type: AvailabilityRuleType;
+  all_day: boolean;
+}
+
+interface ManualChangePayload {
+  action: "ADD";
+  day_of_week: number;
+  start_time: string | null;
+  end_time: string | null;
+  rule_type: AvailabilityRuleType;
+}
+
+function ManualEditModal({
+  onClose,
+  onSubmit,
+  submitting,
+}: {
+  onClose: () => void;
+  onSubmit: (changes: ManualChangePayload[], summary: string) => void;
+  submitting: boolean;
+}) {
+  const [changes, setChanges] = useState<ManualChange[]>([
+    { day_of_week: 0, start_time: "09:00", end_time: "17:00", rule_type: AvailabilityRuleType.AVAILABLE, all_day: false },
+  ]);
+
+  const addRow = () =>
+    setChanges((prev) => [
+      ...prev,
+      { day_of_week: 0, start_time: "09:00", end_time: "17:00", rule_type: AvailabilityRuleType.AVAILABLE, all_day: false },
+    ]);
+
+  const removeRow = (i: number) => setChanges((prev) => prev.filter((_, idx) => idx !== i));
+
+  const updateRow = (i: number, patch: Partial<ManualChange>) =>
+    setChanges((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const buildSummary = () => {
+    return changes
+      .map((c) => {
+        const day = DAY_LABELS_FULL_MODAL[c.day_of_week];
+        const time = c.all_day ? "all day" : `${c.start_time}–${c.end_time}`;
+        return `${c.rule_type.toLowerCase()} ${day} ${time}`;
+      })
+      .join(", ");
+  };
+
+  const handleSubmit = () => {
+    const payload: ManualChangePayload[] = changes.map((c) => ({
+      action: "ADD" as const,
+      day_of_week: c.day_of_week,
+      start_time: c.all_day ? null : c.start_time,
+      end_time: c.all_day ? null : c.end_time,
+      rule_type: c.rule_type,
+    }));
+    onSubmit(payload, buildSummary());
+  };
+
+  const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+  const inputClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring w-24";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-background rounded-xl border shadow-xl w-full max-w-2xl mx-4 p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Edit availability manually</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Changes will be submitted as a proposal for manager review.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
+            <X size={16} />
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          {changes.map((row, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5 bg-muted/20">
+              {/* Day */}
+              <select
+                className={selectClass}
+                value={row.day_of_week}
+                onChange={(e) => updateRow(i, { day_of_week: Number(e.target.value) })}
+              >
+                {DAY_LABELS_FULL_MODAL.map((d, idx) => (
+                  <option key={idx} value={idx}>{d}</option>
+                ))}
+              </select>
+
+              {/* Rule type */}
+              <select
+                className={selectClass}
+                value={row.rule_type}
+                onChange={(e) => updateRow(i, { rule_type: e.target.value as AvailabilityRuleType })}
+              >
+                {RULE_TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+
+              {/* All day toggle */}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={row.all_day}
+                  onChange={(e) => updateRow(i, { all_day: e.target.checked })}
+                  className="rounded"
+                />
+                All day
+              </label>
+
+              {/* Time range */}
+              {!row.all_day && (
+                <>
+                  <input
+                    type="time"
+                    className={inputClass}
+                    value={row.start_time ?? ""}
+                    onChange={(e) => updateRow(i, { start_time: e.target.value })}
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input
+                    type="time"
+                    className={inputClass}
+                    value={row.end_time ?? ""}
+                    onChange={(e) => updateRow(i, { end_time: e.target.value })}
+                  />
+                </>
+              )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="ml-auto text-muted-foreground hover:text-destructive h-7 w-7"
+                onClick={() => removeRow(i)}
+                disabled={changes.length === 1}
+              >
+                <Trash2 size={13} />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
+          <Plus size={13} />
+          Add row
+        </Button>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={handleSubmit} disabled={submitting || changes.length === 0}>
+            {submitting && <Loader2 size={13} className="animate-spin mr-1.5" />}
+            Submit for review
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Clarification Dialog ─────────────────────────────────────────────
+
+function ClarifyDialog({
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  onConfirm: (clarification: string) => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [text, setText] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-background rounded-xl border shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold">Request unclear</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Your request wasn't specific enough. Please add more detail so we can process it correctly.
+          </p>
+        </div>
+        <textarea
+          className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
+          rows={3}
+          placeholder='e.g. "I meant I cannot work Saturday mornings, from 8am to 1pm"'
+          value={text}
+          autoFocus
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (text.trim()) onConfirm(text.trim());
+            }
+          }}
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={() => onConfirm(text.trim())} disabled={!text.trim() || loading}>
+            {loading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+            Resubmit
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export default function MyAvailability() {
   const { employee } = useAuth();
 
   const [rules, setRules] = useState<AvailabilityRuleResponse[]>([]);
-  const [proposals, setProposals] = useState<AIProposalResponse[]>([]);
+  const [proposals, setProposals] = useState<EnrichedProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiText, setAiText] = useState("");
   const [aiSending, setAiSending] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+
+  // Manual edit modal
+  const [showManualEdit, setShowManualEdit] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  // Clarification dialog
+  const [showClarify, setShowClarify] = useState(false);
+  const [originalText, setOriginalText] = useState("");
+
+  const enrichProposals = async (raw: AIProposalResponse[]): Promise<EnrichedProposal[]> => {
+    return Promise.all(
+      raw
+        .filter((p) => p.type === ProposalType.AVAILABILITY && p.status !== ProposalStatus.CANCELLED)
+        .slice(0, 5)
+        .map(async (p): Promise<EnrichedProposal> => {
+          const isManual = !p.ai_output_id;
+          if (isManual) {
+            const cj = (p as AIProposalResponse & { changes_json?: { summary?: string } }).changes_json;
+            return { ...p, summary: cj?.summary };
+          }
+          try {
+            const outRes = await api.get(`/ai-outputs/${p.ai_output_id}`);
+            return { ...p, summary: outRes.data.summary };
+          } catch {
+            return { ...p };
+          }
+        })
+    );
+  };
 
   // Fetch availability rules and recent proposals
   useEffect(() => {
@@ -114,7 +373,7 @@ export default function MyAvailability() {
           meApi.getAIProposals().catch(() => ({ data: [] })),
         ]);
         setRules(rulesRes.data);
-        setProposals(proposalsRes.data);
+        setProposals(await enrichProposals(proposalsRes.data));
       } catch {
         setRules([]);
       } finally {
@@ -123,6 +382,11 @@ export default function MyAvailability() {
     };
     load();
   }, []);
+
+  const refreshProposals = async () => {
+    const res = await meApi.getAIProposals().catch(() => ({ data: [] }));
+    setProposals(await enrichProposals(res.data));
+  };
 
   // Parse rules
   const parsed: ParsedRule[] = useMemo(() => {
@@ -153,20 +417,29 @@ export default function MyAvailability() {
     return map;
   }, [parsed]);
 
-  // Send AI input
-  const handleAiSubmit = async () => {
-    if (!aiText.trim()) return;
+  const handleAiSubmit = async (text: string) => {
+    if (!text.trim()) return;
     setAiSending(true);
     setAiResult(null);
     setAiError(null);
 
     try {
-      const res = await aiInputsApi.create(aiText.trim(), ["availability_rules"]);
-      setAiResult(res.data.summary);
-      setAiText("");
-      // Refresh proposals
-      const proposalsRes = await meApi.getAIProposals().catch(() => ({ data: [] }));
-      setProposals(proposalsRes.data);
+      const res = await aiInputsApi.create(text.trim(), ["availability_rules"]);
+      const summary: string = res.data.summary ?? "";
+
+      const isUnclear =
+        summary.toLowerCase().includes("unclear") ||
+        res.data.status === "INVALID";
+
+      if (isUnclear) {
+        setOriginalText(text.trim());
+        setShowClarify(true);
+        setAiText("");
+      } else {
+        setAiResult(summary);
+        setAiText("");
+        await refreshProposals();
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setAiError(msg ?? "Failed to process request");
@@ -175,12 +448,46 @@ export default function MyAvailability() {
     }
   };
 
-  // Filter to availability-related proposals, most recent first
-  const recentProposals = useMemo(() => {
-    return proposals
-      .filter((p) => p.type === ProposalType.AVAILABILITY)
-      .slice(0, 5);
-  }, [proposals]);
+  const handleClarifyConfirm = async (clarification: string) => {
+    const combined = `${originalText}. To clarify: ${clarification}`;
+    setShowClarify(false);
+    setOriginalText("");
+    await handleAiSubmit(combined);
+  };
+
+  const handleManualSubmit = async (changes: ManualChangePayload[], summary: string) => {
+    setManualSubmitting(true);
+    try {
+      await aiProposalsApi.proposeManual(changes, summary);
+      setShowManualEdit(false);
+      await refreshProposals();
+    } catch {
+      // could add toast here
+    } finally {
+      setManualSubmitting(false);
+    }
+  };
+
+  const handleCancel = async (id: number) => {
+    setCancellingId(id);
+    try {
+      await aiProposalsApi.cancel(id);
+      setProposals((prev) =>
+        prev.map((p) => p.id === id ? { ...p, status: ProposalStatus.CANCELLED } : p)
+      );
+    } catch {
+      // could add toast here
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAiSubmit(aiText);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -194,7 +501,7 @@ export default function MyAvailability() {
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {}}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowManualEdit(true)}>
           <Pencil size={14} />
           Edit manually
         </Button>
@@ -226,15 +533,12 @@ export default function MyAvailability() {
         </div>
       ) : (
         <>
-          {/* Grid view — desktop */}
           <AvailabilityGrid rulesByDay={rulesByDay} />
-
-          {/* Compact view — mobile */}
           <CompactAvailability rulesByDay={rulesByDay} />
         </>
       )}
 
-      {/* AI Input Section */}
+      {/* AI Input */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Request a change</CardTitle>
@@ -247,6 +551,7 @@ export default function MyAvailability() {
             <textarea
               value={aiText}
               onChange={(e) => setAiText(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder='e.g. "I cannot work Saturdays anymore" or "I would prefer morning shifts on Wednesdays"'
               rows={2}
               className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
@@ -254,7 +559,7 @@ export default function MyAvailability() {
             <Button
               size="icon"
               className="shrink-0 self-end"
-              onClick={handleAiSubmit}
+              onClick={() => handleAiSubmit(aiText)}
               disabled={!aiText.trim() || aiSending}
             >
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -275,26 +580,66 @@ export default function MyAvailability() {
       </Card>
 
       {/* Recent Proposals */}
-      {recentProposals.length > 0 && (
+      {proposals.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Recent proposals</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {recentProposals.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                  <span className="text-sm text-muted-foreground">
-                    Proposal #{p.id}
-                  </span>
-                  <Badge variant={PROPOSAL_STATUS_VARIANT[p.status] ?? "default"}>
-                    {p.status}
-                  </Badge>
+              {proposals.map((p) => (
+                <div key={p.id} className="rounded-md border px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <span className="text-sm font-medium truncate block">
+                      {p.summary ?? `Proposal #${p.id}`}
+                    </span>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(p.created_at).toLocaleDateString(undefined, {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant={PROPOSAL_STATUS_VARIANT[p.status] ?? "default"}>
+                      {p.status}
+                    </Badge>
+                    {p.status === ProposalStatus.PENDING && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                        onClick={() => handleCancel(p.id)}
+                        disabled={cancellingId === p.id}
+                      >
+                        {cancellingId === p.id ? <Loader2 size={11} className="animate-spin" /> : "Cancel"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Manual edit modal */}
+      {showManualEdit && (
+        <ManualEditModal
+          onClose={() => setShowManualEdit(false)}
+          onSubmit={handleManualSubmit}
+          submitting={manualSubmitting}
+        />
+      )}
+
+      {/* Clarification dialog */}
+      {showClarify && (
+        <ClarifyDialog
+          onConfirm={handleClarifyConfirm}
+          onCancel={() => { setShowClarify(false); setOriginalText(""); }}
+          loading={aiSending}
+        />
       )}
     </div>
   );
@@ -309,7 +654,6 @@ function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]
 
   return (
     <div className="hidden lg:block rounded-lg border bg-card">
-      {/* Hour labels */}
       <div className="flex pb-2 pt-3 px-1">
         <div className="w-20 shrink-0" />
         <div className="flex-1 relative h-5 pr-6">
@@ -328,7 +672,6 @@ function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]
         </div>
       </div>
 
-      {/* Day rows */}
       <div className="space-y-0">
         {Array.from({ length: 7 }, (_, dayIdx) => {
           const dayRules = rulesByDay.get(dayIdx) ?? [];
@@ -347,38 +690,29 @@ function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]
               </div>
 
               <div className="flex-1 relative py-2.5 px-1 pr-6">
-                {/* Gridlines */}
                 {Array.from({ length: GRID_HOURS + 1 }, (_, i) => {
                   const pct = (i / GRID_HOURS) * 100;
                   const isMajor = i % 2 === 0;
                   return (
                     <div
                       key={i}
-                      className={cn(
-                        "absolute top-0 bottom-0",
-                        isMajor ? "bg-border" : "bg-border/50"
-                      )}
+                      className={cn("absolute top-0 bottom-0", isMajor ? "bg-border" : "bg-border/50")}
                       style={{ left: `${pct}%`, width: isMajor ? "2px" : "1px" }}
                     />
                   );
                 })}
 
-                {/* No rules = all day available */}
                 {!hasRules && (
-                  <div
-                    className="absolute top-1.5 bottom-1.5 left-0 right-6 rounded-md bg-muted/40 border border-border/60 flex items-center justify-center"
-                  >
+                  <div className="absolute top-1.5 bottom-1.5 left-0 right-6 rounded-md bg-muted/40 border border-border/60 flex items-center justify-center">
                     <span className="text-xs text-muted-foreground">All day</span>
                   </div>
                 )}
 
-                {/* Rule blocks */}
                 {dayRules.map((rule) => {
                   const left = ((rule.startHour - GRID_START) / GRID_HOURS) * 100;
                   const width = ((rule.endHour - rule.startHour) / GRID_HOURS) * 100;
                   const style = RULE_STYLES[rule.ruleType];
                   const isUnavailable = rule.ruleType === AvailabilityRuleType.UNAVAILABLE;
-
                   const timeLabel = rule.isFullDay
                     ? "All day"
                     : `${formatRuleTime(rule.startStr)} – ${formatRuleTime(rule.endStr)}`;

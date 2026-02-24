@@ -16,7 +16,7 @@ from app.db.models.role_requirements import RoleRequirements
 from app.db.models.labour_budgets import LabourBudgets
 from app.db.models.ai_inputs import AIInputs
 from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
-from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus
+from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus, ProposalSource
 
 __all__ = [
     "Base",
@@ -48,4 +48,5 @@ __all__ = [
     "AIOutputStatus",
     "ProposalType",
     "ProposalStatus",
+    "ProposalSource",
 ]

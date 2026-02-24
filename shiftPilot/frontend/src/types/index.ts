@@ -50,6 +50,11 @@ export enum ProposalStatus {
   CANCELLED = "CANCELLED",
 }
 
+export enum ProposalSource {
+  AI = "AI",
+  MANUAL = "MANUAL",
+}
+
 // Auth
 
 export interface Token {

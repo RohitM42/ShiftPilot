@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.ai_inputs import AIInputs
 from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
-from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus
+from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus, ProposalSource
 from app.db.models.users import Users
 from app.api.deps import is_manager_or_admin
 
@@ -142,6 +142,7 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
 
     proposal = AIProposals(
         ai_output_id=ai_output.id,
+        source=ProposalSource.AI,
         type=proposal_type,
         store_id=result.get("store_id", store_id),
         department_id=result.get("department_id"),
