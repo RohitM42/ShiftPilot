@@ -77,10 +77,12 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     llm_response = provider.generate_json(system_prompt, user_prompt)
 
     if not llm_response.success or not llm_response.parsed_json:
+        is_rate_limit = llm_response.error and "429" in llm_response.error
         return _create_error_output(
             db, ai_input,
             f"LLM processing failed: {llm_response.error}",
             model_used=llm_response.model_used,
+            is_transient=is_rate_limit,
         )
 
     result = llm_response.parsed_json
@@ -166,8 +168,11 @@ def _create_error_output(
     ai_input: AIInputs,
     error_msg: str,
     model_used: str = "none",
+    is_transient: bool = False,
 ) -> AIOutputs:
-    """Create an INVALID output for failed processing."""
+    """Create an INVALID output for failed processing.
+    is_transient=True (e.g. 429) leaves processed=False so the input can be retried.
+    """
     ai_output = AIOutputs(
         input_id=ai_input.id,
         result_json={"error": error_msg},
@@ -176,7 +181,7 @@ def _create_error_output(
         model_used=model_used,
     )
     db.add(ai_output)
-    ai_input.processed = True
+    ai_input.processed = not is_transient
     db.commit()
     db.refresh(ai_output)
     return ai_output

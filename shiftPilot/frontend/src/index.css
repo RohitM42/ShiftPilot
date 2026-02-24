@@ -48,3 +48,23 @@
     font-family: "DM Sans", sans-serif;
   }
 }
+
+.unavailable-block {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(0 60% 95%),
+    hsl(0 60% 95%) 4px,
+    hsl(0 60% 88%) 4px,
+    hsl(0 60% 88%) 8px
+  );
+}
+
+.unavailable-swatch {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(0 60% 95%),
+    hsl(0 60% 95%) 2px,
+    hsl(0 60% 88%) 2px,
+    hsl(0 60% 88%) 4px
+  );
+}

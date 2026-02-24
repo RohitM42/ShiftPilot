@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # AI API keys
     GEMINI_API_KEY: str = ""
     LLM_PROVIDER: str = "gemini"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",
