@@ -130,3 +130,18 @@ All API calls go through a single axios instance in `frontend/src/services/api.t
 - All soft deletes use `active: bool` — never hard delete records
 - Store-scoped access must always be enforced — managers operate within their `store_id` only
 - Permission checks live in `backend/app/api/deps.py` — do not inline permission logic in routes
+
+## Keeping This File Up to Date
+
+Update this file when a change is **architectural or recurring** — something that would cause confusion or a repeated mistake if Claude weren't aware of it next session. The bar is high: don't update for one-off fixes, minor refactors, or anything that's obvious from reading the code.
+
+**Update when:**
+- A new service, module, or major abstraction is introduced that affects how other parts of the system interact with it
+- A rule or constraint is established that Claude must follow in future sessions (e.g. "do not use X", "always route through Y")
+- A non-obvious architectural decision is made that future Claude instances would likely get wrong without context
+- A previously documented behaviour changes in a meaningful way (e.g. a solver is swapped out, a new auth flow is introduced)
+
+**Do not update for:**
+- Bug fixes, UI tweaks, or isolated feature additions that don't change system-wide patterns
+- Information already inferable from the code itself
+- Decisions that only apply to the current task and won't recur

@@ -28,6 +28,28 @@ class ManualAvailabilityProposalCreate(BaseModel):
     summary: str
 
 
+class ManualSchedulingChange(BaseModel):
+    action: str                              # ADD
+    day_of_week: Optional[int] = None        # 0-6, or null = every day (role requirements)
+    start_time: str                          # HH:MM
+    end_time: str                            # HH:MM
+    # Coverage fields
+    min_staff: Optional[int] = None
+    max_staff: Optional[int] = None
+    # Role requirement fields
+    requires_manager: Optional[bool] = None
+    requires_keyholder: Optional[bool] = None
+    min_manager_count: Optional[int] = None
+
+
+class ManualSchedulingProposalCreate(BaseModel):
+    intent_type: str                         # COVERAGE or ROLE_REQUIREMENT
+    store_id: int
+    department_id: Optional[int] = None      # required for COVERAGE, optional for ROLE_REQUIREMENT
+    summary: str
+    changes: List[ManualSchedulingChange]
+
+
 router = APIRouter(prefix="/ai-proposals", tags=["ai-proposals"])
 
 
@@ -162,6 +184,41 @@ def create_manual_availability_proposal(
         changes_json=changes_json,
         type=ProposalType.AVAILABILITY,
         store_id=employee.store_id,
+        status=ProposalStatus.PENDING,
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
+
+@router.post("/propose/manual/scheduling", response_model=AIProposalResponse, status_code=status.HTTP_201_CREATED)
+def create_manual_scheduling_proposal(
+    payload: ManualSchedulingProposalCreate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(require_manager_or_admin),
+):
+    """Create a manual coverage or role requirement proposal — manager/admin only"""
+    if payload.intent_type not in ("COVERAGE", "ROLE_REQUIREMENT"):
+        raise HTTPException(status_code=400, detail="intent_type must be COVERAGE or ROLE_REQUIREMENT")
+
+    proposal_type = ProposalType.COVERAGE if payload.intent_type == "COVERAGE" else ProposalType.ROLE_REQUIREMENT
+
+    changes_json = {
+        "intent_type": payload.intent_type,
+        "store_id": payload.store_id,
+        "department_id": payload.department_id,
+        "summary": payload.summary,
+        "changes": [c.model_dump() for c in payload.changes],
+    }
+
+    proposal = AIProposals(
+        ai_output_id=None,
+        source=ProposalSource.MANUAL,
+        changes_json=changes_json,
+        type=proposal_type,
+        store_id=payload.store_id,
+        department_id=payload.department_id,
         status=ProposalStatus.PENDING,
     )
     db.add(proposal)

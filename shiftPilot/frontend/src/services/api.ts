@@ -75,6 +75,20 @@ export const aiProposalsApi = {
   cancel: (id: number) => api.patch(`/ai-proposals/${id}/cancel`),
   proposeManual: (changes: object[], summary: string) =>
     api.post("/ai-proposals/propose/manual", { changes, summary }),
+  proposeManualScheduling: (
+    intent_type: "COVERAGE" | "ROLE_REQUIREMENT",
+    store_id: number,
+    department_id: number | null,
+    changes: object[],
+    summary: string
+  ) =>
+    api.post("/ai-proposals/propose/manual/scheduling", {
+      intent_type,
+      store_id,
+      department_id,
+      changes,
+      summary,
+    }),
 };
 
 // Availability Rules
@@ -121,6 +135,11 @@ export const employeesApi = {
 export const shiftsApi = {
   list: (params?: Record<string, unknown>) =>
     api.get("/shifts", { params }),
+};
+
+// Departments
+export const departmentsApi = {
+  list: () => api.get("/departments"),
 };
 
 // User Roles

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Check, X, Eye, Loader2, ChevronDown } from "lucide-react";
+import { Check, X, Eye, Loader2, ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,14 @@ const STATUS_FILTER_OPTIONS = [
   { value: ProposalStatus.APPROVED, label: "Approved" },
   { value: ProposalStatus.REJECTED, label: "Rejected" },
   { value: ProposalStatus.CANCELLED, label: "Cancelled" },
+];
+
+const TYPE_FILTER_OPTIONS = [
+  { value: "all", label: "All types" },
+  { value: ProposalType.AVAILABILITY, label: "Availability" },
+  { value: ProposalType.COVERAGE, label: "Coverage" },
+  { value: ProposalType.ROLE_REQUIREMENT, label: "Role Requirement" },
+  { value: ProposalType.LABOUR_BUDGET, label: "Labour Budget" },
 ];
 
 // ── Reject Dialog ────────────────────────────────────────────────────
@@ -230,6 +238,8 @@ export default function ProposalReview() {
   // Filters
   const [storeFilter, setStoreFilter] = useState<number | "all">("all");
   const [statusFilter, setStatusFilter] = useState<ProposalStatus | "all">(ProposalStatus.PENDING);
+  const [typeFilter, setTypeFilter] = useState<ProposalType | "all">("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Action state
   const [approving, setApproving] = useState<number | null>(null);
@@ -338,15 +348,24 @@ export default function ProposalReview() {
     load();
   }, [isAdmin, currentEmployee, storeFilter]);
 
-  // Apply status filter client-side
+  // Apply status, type, and search filters client-side
   const filtered = useMemo(() => {
     let list = statusFilter === "all" ? proposals : proposals.filter((p) => p.status === statusFilter);
+    if (isAdmin && typeFilter !== "all") list = list.filter((p) => p.type === typeFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((p) =>
+        p.summary?.toLowerCase().includes(q) ||
+        p.affectedUserName?.toLowerCase().includes(q) ||
+        p.requestedByName?.toLowerCase().includes(q)
+      );
+    }
     return list.sort((a, b) => {
       if (a.status === ProposalStatus.PENDING && b.status !== ProposalStatus.PENDING) return -1;
       if (a.status !== ProposalStatus.PENDING && b.status === ProposalStatus.PENDING) return 1;
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
-  }, [proposals, statusFilter]);
+  }, [proposals, statusFilter, typeFilter, searchQuery, isAdmin]);
 
   // Store name lookup
   const storeMap = useMemo(() => {
@@ -414,6 +433,17 @@ export default function ProposalReview() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={isAdmin ? "Search name, department…" : "Search by name…"}
+            className="w-full rounded-md border bg-background px-9 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
         {/* Store filter — admin only */}
         {isAdmin && (
           <div className="relative">
@@ -448,6 +478,22 @@ export default function ProposalReview() {
           </select>
           <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         </div>
+
+        {/* Type filter — admin only */}
+        {isAdmin && (
+          <div className="relative">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as ProposalType | "all")}
+              className="appearance-none rounded-md border bg-background pl-3 pr-8 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              {TYPE_FILTER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+        )}
       </div>
 
       {/* List */}
