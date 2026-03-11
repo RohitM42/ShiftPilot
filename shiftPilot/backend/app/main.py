@@ -18,6 +18,7 @@ from app.api.routes import (
     ai_inputs,
     ai_outputs,
     ai_proposals,
+    schedule,
 )
 
 app = FastAPI(title="ShiftPilot API", version="0.1.0")
@@ -40,6 +41,7 @@ app.include_router(me.router, prefix="/api/v1")
 app.include_router(ai_inputs.router, prefix="/api/v1")
 app.include_router(ai_outputs.router, prefix="/api/v1")
 app.include_router(ai_proposals.router, prefix="/api/v1")
+app.include_router(schedule.router, prefix="/api/v1")
 
 
 @app.get("/health")

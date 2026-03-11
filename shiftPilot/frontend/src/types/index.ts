@@ -105,6 +105,12 @@ export interface EmployeeResponse {
   updated_at: string;
 }
 
+export interface EmployeeWithUserResponse extends EmployeeResponse {
+  firstname: string;
+  surname: string;
+  email: string;
+}
+
 // Employee Departments
 
 export interface EmployeeDepartmentResponse {
@@ -248,6 +254,40 @@ export interface Store {
   name: string;
   location: string;
   timezone: string;
+}
+
+// Schedule generation
+
+export interface UnmetCoverageItem {
+  department_id: number;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  min_staff: number;
+}
+
+export interface UnmetRoleItem {
+  department_id: number | null;
+  day_of_week: number | null;
+  start_time: string;
+  end_time: string;
+  requires_keyholder: boolean;
+  requires_manager: boolean;
+  min_manager_count: number;
+}
+
+export interface GenerateScheduleResponse {
+  success: boolean;
+  shifts_created: number;
+  shift_ids: number[];
+  unmet_coverage: UnmetCoverageItem[];
+  unmet_role_requirements: UnmetRoleItem[];
+  unmet_contracted_hours: Record<string, number>; // str(employee_id) -> shortfall hours
+  warnings: string[];
+}
+
+export interface PublishBulkResponse {
+  published_count: number;
 }
 
 // Day of week helpers

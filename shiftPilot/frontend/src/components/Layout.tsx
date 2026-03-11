@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
   Calendar,
+  CalendarRange,
   Clock,
   Settings,
   ClipboardCheck,
@@ -54,6 +55,11 @@ export function Layout() {
               <div className="pt-4 pb-1 px-3 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                 Management
               </div>
+
+              <NavLink to="/schedule" className={navLinkClass}>
+                <CalendarRange size={18} />
+                Schedule
+              </NavLink>
 
               <NavLink to="/scheduling-rules" className={navLinkClass}>
                 <Settings size={18} />

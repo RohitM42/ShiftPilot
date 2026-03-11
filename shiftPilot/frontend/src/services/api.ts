@@ -146,3 +146,25 @@ export const departmentsApi = {
 export const userRolesApi = {
   getForUser: (userId: number) => api.get(`/user-roles/user/${userId}`),
 };
+
+// Stores
+export const storesApi = {
+  list: () => api.get("/stores"),
+};
+
+// Employee Departments
+export const employeeDepartmentsApi = {
+  listByStore: (storeId: number) =>
+    api.get("/employee-departments", { params: { store_id: storeId } }),
+};
+
+// Schedule
+export const scheduleApi = {
+  generate: (payload: {
+    store_id: number;
+    week_start: string; // "YYYY-MM-DD"
+    mode: "add" | "replace";
+  }) => api.post("/schedule/generate", payload),
+  publishBulk: (shiftIds: number[]) =>
+    api.post("/schedule/publish-bulk", { shift_ids: shiftIds }),
+};

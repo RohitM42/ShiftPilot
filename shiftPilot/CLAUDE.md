@@ -117,6 +117,9 @@ All API calls go through a single axios instance in `frontend/src/services/api.t
 
 ## Important Development Rules
 
+### Git
+- **DO NOT make git commits** — make changes to files and save them; the user will commit manually
+
 ### Solver
 - `or_solver.py` is the only active solver — do NOT use or regress to `solver.py` (greedy solver is deprecated)
 - 30-minute slot granularity is a known future consideration — do not implement unless explicitly asked

@@ -10,6 +10,7 @@ import SchedulingRules from "@/pages/SchedulingRules";
 import ProposalReview from "@/pages/ProposalReview";
 import EmployeeManagement from "@/pages/EmployeeManagement";
 import EmployeeEdit from "@/pages/EmployeeEdit";
+import ScheduleView from "@/pages/ScheduleView";
 
 function LoginGuard() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -35,6 +36,14 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="my-shifts" element={<MyShifts />} />
             <Route path="my-availability" element={<MyAvailability />} />
+            <Route
+              path="schedule"
+              element={
+                <ProtectedRoute requireManagerOrAdmin>
+                  <ScheduleView />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="scheduling-rules"
               element={
