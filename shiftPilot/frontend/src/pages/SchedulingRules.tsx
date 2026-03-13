@@ -927,6 +927,16 @@ export default function SchedulingRules() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [showClarify, setShowClarify] = useState(false);
+
+  // AI preview confirmation
+  const [aiPreview, setAiPreview] = useState<{
+    outputId: number;
+    summary: string;
+    intentType: string;
+    departmentId: number | null;
+    changes: Array<Record<string, unknown>>;
+  } | null>(null);
+  const [confirmingSend, setConfirmingSend] = useState(false);
   const [originalText, setOriginalText] = useState("");
 
   // Manual modal
@@ -1021,6 +1031,28 @@ export default function SchedulingRules() {
     if (id != null) setExpandedDays(new Set()); // collapse all when filtering
   };
 
+  // Format a single change from result_json into a readable bullet string
+  const formatChangeBullet = (change: Record<string, unknown>, intentType: string): string => {
+    const action = String(change.action ?? "ADD");
+    const day = change.day_of_week == null ? "every day" : DAY_LABELS_FULL[change.day_of_week as number];
+    const start = change.start_time ? formatRuleTime(String(change.start_time)) : "—";
+    const end = change.end_time ? formatRuleTime(String(change.end_time)) : "—";
+    const time = `${start}–${end}`;
+
+    if (intentType === "COVERAGE") {
+      const dept = change.department_id != null ? (deptMap.get(change.department_id as number)?.name ?? `Dept ${change.department_id}`) : "store";
+      const staff = change.min_staff != null ? `min ${change.min_staff}` : "";
+      const maxStaff = change.max_staff != null ? ` / max ${change.max_staff}` : "";
+      return `${action} · Coverage · ${dept} · ${day} · ${time}${staff ? ` · ${staff}${maxStaff} staff` : ""}`;
+    }
+    // ROLE_REQUIREMENT
+    const roles: string[] = [];
+    if (change.requires_manager) roles.push("Manager");
+    if (change.requires_keyholder) roles.push("Keyholder");
+    const roleLabel = roles.length > 0 ? roles.join(" + ") : "Role req";
+    return `${action} · ${roleLabel} · ${day} · ${time}`;
+  };
+
   // AI submit
   const handleAiSubmit = async (text: string) => {
     if (!text.trim()) return;
@@ -1033,7 +1065,7 @@ export default function SchedulingRules() {
       : ["role_requirements"];
 
     try {
-      const res = await aiInputsApi.create(text.trim(), contextTables, storeId);
+      const res = await aiInputsApi.create(text.trim(), contextTables, storeId, true);
       const summary: string = res.data.summary ?? "";
       const isUnclear =
         summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
@@ -1043,9 +1075,15 @@ export default function SchedulingRules() {
         setShowClarify(true);
         setAiText("");
       } else {
-        setAiResult(summary);
+        const result = res.data.result_json ?? {};
+        setAiPreview({
+          outputId: res.data.id,
+          summary,
+          intentType: result.intent_type ?? "",
+          departmentId: result.department_id ?? null,
+          changes: Array.isArray(result.changes) ? result.changes : [],
+        });
         setAiText("");
-        await refreshProposals();
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -1054,6 +1092,24 @@ export default function SchedulingRules() {
       setAiSending(false);
     }
   };
+
+  const handleConfirmProposal = async () => {
+    if (!aiPreview) return;
+    setConfirmingSend(true);
+    try {
+      await aiProposalsApi.confirmPreview(aiPreview.outputId);
+      setAiResult(aiPreview.summary);
+      setAiPreview(null);
+      await refreshProposals();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAiError(msg ?? "Failed to send proposal");
+    } finally {
+      setConfirmingSend(false);
+    }
+  };
+
+  const handleDiscardPreview = () => setAiPreview(null);
 
   const handleClarifyConfirm = async (clarification: string) => {
     const combined = `${originalText}. To clarify: ${clarification}`;
@@ -1277,18 +1333,48 @@ export default function SchedulingRules() {
                   : 'e.g. "A manager must be present every day from 9am to 6pm"'
               }
               rows={2}
-              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
+              disabled={aiPreview != null}
+              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none disabled:opacity-50"
             />
             <Button
               size="icon"
               className="shrink-0 self-end"
               onClick={() => handleAiSubmit(aiText)}
-              disabled={!aiText.trim() || aiSending}
+              disabled={!aiText.trim() || aiSending || aiPreview != null}
             >
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
-          {aiResult && (
+
+          {aiPreview && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Preview — not yet submitted</p>
+                <p className="text-sm text-amber-900">{aiPreview.summary}</p>
+                {aiPreview.changes.length > 0 && (
+                  <ul className="space-y-1 pt-1">
+                    {aiPreview.changes.map((c, i) => (
+                      <li key={i} className="text-xs text-amber-800 flex gap-1.5">
+                        <span className="opacity-50 shrink-0">•</span>
+                        <span>{formatChangeBullet(c, aiPreview.intentType)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" className="gap-1.5" onClick={handleConfirmProposal} disabled={confirmingSend}>
+                  {confirmingSend ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  Send proposal
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDiscardPreview} disabled={confirmingSend}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!aiPreview && aiResult && (
             <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-800">
               {aiResult}
             </div>
