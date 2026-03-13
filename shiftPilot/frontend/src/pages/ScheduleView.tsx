@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { format, addDays, isToday, isTomorrow, parseISO } from "date-fns";
+import { format, addDays, isToday, parseISO } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   shiftsApi,
   employeesApi,
@@ -22,208 +22,13 @@ import type {
 } from "@/types";
 import { ShiftStatus } from "@/types";
 import { cn } from "@/lib/utils";
+import { EmployeeGantt, type ParsedShift } from "@/components/EmployeeGantt";
 
 // ── Constants ────────────────────────────────────────────────────────
-
-const GRID_START = 0;
-const GRID_END = 24;
-const GRID_HOURS = GRID_END - GRID_START;
-
-// ── Time helpers ─────────────────────────────────────────────────────
-
-const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(
-    new Date(2000, 0, 1, 13)
-  );
-  return formatted.includes("13");
-})();
-
-function formatHourLabel(hour: number): string {
-  if (hour === 24) return is24Hour ? "00:00" : "12am";
-  if (is24Hour) return `${hour.toString().padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
-}
-
-function formatShiftTime(dt: Date): string {
-  if (is24Hour) return format(dt, "HH:mm");
-  return format(dt, "h:mma").toLowerCase();
-}
-
-// ── Types ────────────────────────────────────────────────────────────
-
-interface ParsedShift {
-  id: number;
-  employeeId: number;
-  start: Date;
-  end: Date;
-  departmentId: number;
-  departmentName: string;
-  hours: number;
-  status: ShiftStatus;
-}
-
-// ── Sub-components ───────────────────────────────────────────────────
 
 const DAY_NAMES_FULL = [
   "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 ];
-
-function EmployeeGantt({
-  employees,
-  shiftsByEmployee,
-}: {
-  employees: EmployeeWithUserResponse[];
-  shiftsByEmployee: Map<number, ParsedShift[]>;
-}) {
-  const hourLabels = Array.from(
-    { length: GRID_HOURS / 2 + 1 },
-    (_, i) => GRID_START + i * 2
-  ).filter((h) => h < GRID_END);
-
-  return (
-    <div className="rounded-lg border bg-card">
-      {/* Timeline header */}
-      <div className="flex pb-2 pt-3 px-1">
-        <div className="w-40 shrink-0" />
-        <div className="flex-1 relative h-5 pr-6">
-          {hourLabels.map((h) => {
-            const pct = ((h - GRID_START) / GRID_HOURS) * 100;
-            return (
-              <span
-                key={h}
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-xs text-muted-foreground"
-                style={{ left: `${pct}%` }}
-              >
-                {formatHourLabel(h)}
-              </span>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Employee rows */}
-      <div className="space-y-0">
-        {employees.length === 0 && (
-          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm border-t">
-            No employees found.
-          </div>
-        )}
-        {employees.map((emp) => {
-          const empShifts = shiftsByEmployee.get(emp.id) ?? [];
-          const hasShifts = empShifts.length > 0;
-
-          return (
-            <div
-              key={emp.id}
-              className={cn(
-                "flex border-t border-border/80",
-                hasShifts ? "min-h-[3.5rem]" : "min-h-[1.75rem]"
-              )}
-            >
-              {/* Employee label */}
-              <div className="w-40 shrink-0 flex flex-col justify-center px-3 py-1">
-                <span
-                  className={cn(
-                    "text-xs font-medium truncate",
-                    hasShifts ? "text-foreground" : "text-muted-foreground"
-                  )}
-                >
-                  {emp.firstname} {emp.surname}
-                </span>
-                {hasShifts && (emp.is_keyholder || emp.is_manager) && (
-                  <div className="flex gap-1 mt-0.5">
-                    {emp.is_manager && (
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
-                        Mgr
-                      </Badge>
-                    )}
-                    {emp.is_keyholder && !emp.is_manager && (
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
-                        KH
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Timeline area */}
-              <div className="flex-1 relative py-1.5 px-1 pr-6">
-                {/* Gridlines */}
-                {Array.from({ length: GRID_HOURS + 1 }, (_, i) => {
-                  const pct = (i / GRID_HOURS) * 100;
-                  const isMajor = i % 2 === 0;
-                  return (
-                    <div
-                      key={i}
-                      className={cn(
-                        "absolute top-0 bottom-0",
-                        isMajor ? "bg-border" : "bg-border/50"
-                      )}
-                      style={{ left: `${pct}%`, width: isMajor ? "2px" : "1px" }}
-                    />
-                  );
-                })}
-
-                {/* Shift badges */}
-                {empShifts.map((shift) => {
-                  const startH =
-                    shift.start.getHours() + shift.start.getMinutes() / 60;
-                  const endH = shift.end.getHours() + shift.end.getMinutes() / 60;
-                  const left = ((startH - GRID_START) / GRID_HOURS) * 100;
-                  const width = ((endH - startH) / GRID_HOURS) * 100;
-                  const isDraft = shift.status === ShiftStatus.DRAFT;
-
-                  return (
-                    <div
-                      key={shift.id}
-                      className={cn(
-                        "absolute top-1 bottom-1 rounded-md flex items-center justify-between px-2 overflow-hidden",
-                        isDraft
-                          ? "bg-primary/20 border border-dashed border-primary/60"
-                          : "bg-primary border border-primary"
-                      )}
-                      style={{ left: `${left}%`, width: `${width}%` }}
-                      title={`${emp.firstname} ${emp.surname} · ${shift.departmentName} · ${shift.status}`}
-                    >
-                      <span
-                        className={cn(
-                          "text-xs font-semibold truncate",
-                          isDraft ? "text-primary" : "text-primary-foreground"
-                        )}
-                      >
-                        {formatShiftTime(shift.start)} – {formatShiftTime(shift.end)}
-                        <span
-                          className={cn(
-                            "ml-1.5 font-normal",
-                            isDraft
-                              ? "text-primary/70"
-                              : "text-primary-foreground/80"
-                          )}
-                        >
-                          {shift.departmentName}
-                        </span>
-                      </span>
-                      <span
-                        className={cn(
-                          "text-xs font-medium ml-2 shrink-0",
-                          isDraft ? "text-primary/70" : "text-primary-foreground/70"
-                        )}
-                      >
-                        {shift.hours}h
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function GeneratePanel({
   storeId,
@@ -235,9 +40,9 @@ function GeneratePanel({
   setGeneratedShiftIds,
   generateResult,
   setGenerateResult,
-  publishing,
-  setPublishing,
   onShiftsChanged,
+  onViewSummary,
+  onCancelDrafts,
 }: {
   storeId: number | null;
   expanded: boolean;
@@ -248,9 +53,9 @@ function GeneratePanel({
   setGeneratedShiftIds: (ids: number[]) => void;
   generateResult: GenerateScheduleResponse | null;
   setGenerateResult: (r: GenerateScheduleResponse | null) => void;
-  publishing: boolean;
-  setPublishing: (v: boolean) => void;
   onShiftsChanged: () => void;
+  onViewSummary: (weekStart: string) => void;
+  onCancelDrafts: (shiftIds: number[]) => Promise<void>;
 }) {
   const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null);
   const [mode, setMode] = useState<"add" | "replace">("add");
@@ -338,19 +143,6 @@ function GeneratePanel({
     }
   }
 
-  async function handlePublish() {
-    if (!generatedShiftIds.length) return;
-    setPublishing(true);
-    try {
-      await scheduleApi.publishBulk(generatedShiftIds);
-      setGeneratedShiftIds([]);
-      onShiftsChanged();
-    } catch {
-      // error handling
-    } finally {
-      setPublishing(false);
-    }
-  }
 
   return (
     <div className="rounded-lg border bg-card">
@@ -448,18 +240,25 @@ function GeneratePanel({
               {generating ? "Generating… (may take up to 2 min)" : "Run Generator"}
             </Button>
 
-            {generatedShiftIds.length > 0 && (
-              <Button
-                onClick={handlePublish}
-                disabled={publishing}
-                variant="default"
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-              >
-                {publishing
-                  ? "Publishing…"
-                  : `Publish All (${generatedShiftIds.length} shifts)`}
-              </Button>
+            {generatedShiftIds.length > 0 && selectedWeekStart && (
+              <>
+                <Button
+                  onClick={() => onViewSummary(selectedWeekStart)}
+                  variant="default"
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  View Summary ({generatedShiftIds.length} shifts)
+                </Button>
+                <Button
+                  onClick={() => onCancelDrafts(generatedShiftIds)}
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                >
+                  Cancel Drafts
+                </Button>
+              </>
             )}
           </div>
 
@@ -587,6 +386,7 @@ function UnmetRulesPanel({
 
 export default function ScheduleView() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
 
   // Navigation
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -609,7 +409,6 @@ export default function ScheduleView() {
   const [generating, setGenerating] = useState(false);
   const [generatedShiftIds, setGeneratedShiftIds] = useState<number[]>([]);
   const [generateResult, setGenerateResult] = useState<GenerateScheduleResponse | null>(null);
-  const [publishing, setPublishing] = useState(false);
 
   // Load static data once
   useEffect(() => {
@@ -719,13 +518,19 @@ export default function ScheduleView() {
     });
   }, [employees, selectedDeptId, empDepts]);
 
-  // Navigation
-  const prev = () => setSelectedDate((d) => addDays(d, -1));
-  const next = () => setSelectedDate((d) => addDays(d, 1));
+  // Navigation — week-based
+  const weekMonday = useMemo(() => {
+    const d = new Date(selectedDate);
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day; // shift to Monday
+    d.setDate(d.getDate() + diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [selectedDate]);
+
+  const prevWeek = () => setSelectedDate((d) => addDays(d, -7));
+  const nextWeek = () => setSelectedDate((d) => addDays(d, 7));
   const goToday = () => setSelectedDate(new Date());
-  const goTomorrow = () => setSelectedDate(addDays(new Date(), 1));
-  const isTodaySelected = isToday(selectedDate);
-  const isTomorrowSelected = isTomorrow(selectedDate);
 
   const dateLabel = format(selectedDate, "EEEE, d MMMM yyyy");
 
@@ -781,33 +586,52 @@ export default function ScheduleView() {
           >
             {showDrafts ? "Drafts: On" : "Drafts: Off"}
           </Button>
-
-          {/* Day navigation */}
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" onClick={prev}>
-              <ChevronLeft size={18} />
-            </Button>
-            <Button
-              variant={isTodaySelected ? "default" : "ghost"}
-              size="sm"
-              className="text-xs"
-              onClick={goToday}
-            >
-              Today
-            </Button>
-            <Button
-              variant={isTomorrowSelected ? "default" : "ghost"}
-              size="sm"
-              className="text-xs"
-              onClick={goTomorrow}
-            >
-              Tomorrow
-            </Button>
-            <Button variant="outline" size="icon" onClick={next}>
-              <ChevronRight size={18} />
-            </Button>
-          </div>
         </div>
+      </div>
+
+      {/* Week day tabs */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <Button variant="outline" size="icon" onClick={prevWeek}>
+          <ChevronLeft size={16} />
+        </Button>
+
+        {Array.from({ length: 7 }, (_, i) => {
+          const date = addDays(weekMonday, i);
+          const isSelected =
+            format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+          const todayDate = isToday(date);
+          return (
+            <button
+              key={i}
+              onClick={() => setSelectedDate(date)}
+              className={`w-16 rounded-md border py-1.5 text-center text-sm transition-colors ${
+                isSelected
+                  ? "border-primary bg-primary/10 text-primary font-medium"
+                  : todayDate
+                  ? "border-primary/40 bg-primary/5 text-foreground hover:bg-primary/10"
+                  : "hover:bg-accent text-muted-foreground"
+              }`}
+            >
+              <span className="block text-xs font-semibold">
+                {format(date, "EEE").toUpperCase()}
+              </span>
+              <span className="block text-xs">{format(date, "d MMM")}</span>
+            </button>
+          );
+        })}
+
+        <Button variant="outline" size="icon" onClick={nextWeek}>
+          <ChevronRight size={16} />
+        </Button>
+
+        <Button
+          variant={isToday(selectedDate) ? "default" : "outline"}
+          size="sm"
+          className="text-xs ml-1"
+          onClick={goToday}
+        >
+          Today
+        </Button>
       </div>
 
       {/* Admin: prompt to select store */}
@@ -842,8 +666,6 @@ export default function ScheduleView() {
             setGeneratedShiftIds={setGeneratedShiftIds}
             generateResult={generateResult}
             setGenerateResult={setGenerateResult}
-            publishing={publishing}
-            setPublishing={setPublishing}
             onShiftsChanged={() => {
               const dayStart = new Date(selectedDate);
               dayStart.setHours(0, 0, 0, 0);
@@ -857,6 +679,21 @@ export default function ScheduleView() {
                   limit: 500,
                 })
                 .then((r) => setShifts(r.data));
+            }}
+            onViewSummary={(weekStart) =>
+              navigate("/schedule/summary", {
+                state: {
+                  shiftIds: generatedShiftIds,
+                  weekStart,
+                  storeId: resolvedStoreId,
+                  generateResult,
+                },
+              })
+            }
+            onCancelDrafts={async (shiftIds) => {
+              await scheduleApi.cancelBulk(shiftIds);
+              setGeneratedShiftIds([]);
+              setGenerateResult(null);
             }}
           />
 

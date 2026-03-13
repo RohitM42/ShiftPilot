@@ -167,4 +167,6 @@ export const scheduleApi = {
   }) => api.post("/schedule/generate", payload),
   publishBulk: (shiftIds: number[]) =>
     api.post("/schedule/publish-bulk", { shift_ids: shiftIds }),
+  cancelBulk: (shiftIds: number[]) =>
+    api.post("/schedule/cancel-bulk", { shift_ids: shiftIds }),
 };

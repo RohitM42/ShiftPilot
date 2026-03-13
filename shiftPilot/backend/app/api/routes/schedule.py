@@ -107,6 +107,32 @@ def generate_schedule_endpoint(
     )
 
 
+@router.post("/cancel-bulk", response_model=PublishBulkResponse)
+def cancel_bulk(
+    payload: PublishBulkRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(require_manager_or_admin),
+):
+    accessible_stores = get_accessible_store_ids(db, current_user)
+    shifts = db.query(Shifts).filter(Shifts.id.in_(payload.shift_ids)).all()
+
+    if len(shifts) != len(set(payload.shift_ids)):
+        found_ids = {s.id for s in shifts}
+        missing = [sid for sid in payload.shift_ids if sid not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Shifts not found: {missing}")
+
+    for shift in shifts:
+        if accessible_stores is not None and shift.store_id not in accessible_stores:
+            raise HTTPException(
+                status_code=403, detail=f"No access to shift {shift.id}"
+            )
+        if shift.status == ShiftStatus.DRAFT:
+            shift.status = ShiftStatus.CANCELLED
+
+    db.commit()
+    return PublishBulkResponse(published_count=len(shifts))
+
+
 @router.post("/publish-bulk", response_model=PublishBulkResponse)
 def publish_bulk(
     payload: PublishBulkRequest,
