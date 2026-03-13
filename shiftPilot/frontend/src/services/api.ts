@@ -51,8 +51,8 @@ export const meApi = {
 
 // AI Inputs
 export const aiInputsApi = {
-  create: (input_text: string, context_tables?: string[]) =>
-    api.post("/ai-inputs", { input_text, context_tables }),
+  create: (input_text: string, context_tables?: string[], store_id?: number | null) =>
+    api.post("/ai-inputs", { input_text, context_tables, ...(store_id != null && { store_id }) }),
 };
 
 // AI Proposals

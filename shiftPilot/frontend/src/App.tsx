@@ -12,6 +12,7 @@ import EmployeeManagement from "@/pages/EmployeeManagement";
 import EmployeeEdit from "@/pages/EmployeeEdit";
 import ScheduleView from "@/pages/ScheduleView";
 import ScheduleSummaryView from "@/pages/ScheduleSummaryView";
+import ProposalView from "@/pages/ProposalView";
 
 function LoginGuard() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -66,6 +67,14 @@ export default function App() {
               element={
                 <ProtectedRoute requireManagerOrAdmin>
                   <ProposalReview />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="proposals/:id"
+              element={
+                <ProtectedRoute requireManagerOrAdmin>
+                  <ProposalView />
                 </ProtectedRoute>
               }
             />

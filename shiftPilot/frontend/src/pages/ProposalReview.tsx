@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Check, X, Eye, Loader2, ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -132,6 +133,7 @@ function ProposalCard({
   approving: number | null;
 }) {
   const isPending = proposal.status === ProposalStatus.PENDING;
+  const navigate = useNavigate();
 
   return (
     <Card className="px-4 py-3.5 space-y-2.5">
@@ -194,7 +196,7 @@ function ProposalCard({
 
         {isPending && (
           <div className="flex items-center gap-2 shrink-0">
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-8" onClick={() => {}} disabled>
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-8" onClick={() => navigate(`/proposals/${proposal.id}`)}>
               <Eye size={13} />
               View
             </Button>

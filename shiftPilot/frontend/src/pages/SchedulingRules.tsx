@@ -4,11 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi } from "@/services/api";
+import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi } from "@/services/api";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { ProposalType, ProposalStatus } from "@/types";
-import type { CoverageRequirementResponse, RoleRequirementResponse, AIProposalResponse, Department } from "@/types";
+import type { CoverageRequirementResponse, RoleRequirementResponse, AIProposalResponse, Department, Store } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -885,12 +885,31 @@ interface EnrichedProposal extends AIProposalResponse {
 }
 
 export default function SchedulingRules() {
-  const { employee, roles } = useAuth();
+  const { employee, roles, isAdmin } = useAuth();
 
-  const storeId: number | null = useMemo(
+  // For non-admin: derive store from employee record or role
+  const derivedStoreId: number | null = useMemo(
     () => employee?.store_id ?? roles.find((r) => r.store_id != null)?.store_id ?? null,
     [employee, roles]
   );
+
+  // Admins can select any store; others use their derived store
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<number | null>(null);
+
+  const storeId: number | null = isAdmin ? selectedStoreId : derivedStoreId;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    storesApi.list().then((res) => {
+      const list: Store[] = res.data;
+      setStores(list);
+      // Pre-select first store if none chosen yet
+      if (selectedStoreId == null && list.length > 0) {
+        setSelectedStoreId(list[0].id);
+      }
+    }).catch(() => {});
+  }, [isAdmin]);
 
   const [coverageRules, setCoverageRules] = useState<CoverageRequirementResponse[]>([]);
   const [roleRules, setRoleRules] = useState<RoleRequirementResponse[]>([]);
@@ -1014,7 +1033,7 @@ export default function SchedulingRules() {
       : ["role_requirements"];
 
     try {
-      const res = await aiInputsApi.create(text.trim(), contextTables);
+      const res = await aiInputsApi.create(text.trim(), contextTables, storeId);
       const summary: string = res.data.summary ?? "";
       const isUnclear =
         summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
@@ -1120,6 +1139,18 @@ export default function SchedulingRules() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Store filter — admin only */}
+          {isAdmin && stores.length > 0 && (
+            <select
+              className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              value={selectedStoreId ?? ""}
+              onChange={(e) => setSelectedStoreId(e.target.value === "" ? null : parseInt(e.target.value))}
+            >
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
           {/* Department filter */}
           <select
             className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"

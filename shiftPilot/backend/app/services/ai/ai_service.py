@@ -13,6 +13,7 @@ from app.db.models.ai_inputs import AIInputs
 from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
 from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus, ProposalSource
 from app.db.models.users import Users
+from app.db.models.user_roles import UserRoles
 from app.api.deps import is_manager_or_admin
 
 from .llm_provider import get_llm_provider, LLMResponse
@@ -35,7 +36,7 @@ INTENT_TO_PROPOSAL_TYPE = {
 }
 
 
-def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AIOutputs:
+def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, explicit_store_id: Optional[int] = None) -> AIOutputs:
     """
     Main entry point. Processes an AI input and creates output + proposal.
 
@@ -52,13 +53,31 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     is_mgr_or_admin = is_manager_or_admin(db, current_user)
     employee_ctx = load_employee_context(db, current_user.id)
 
-    if not employee_ctx:
+    if not employee_ctx and not is_mgr_or_admin:
         return _create_error_output(db, ai_input, "No employee record found for user")
 
-    store_id = employee_ctx["store_id"]
+    store_id = employee_ctx["store_id"] if employee_ctx else None
+
+    # For admins/managers whose employee record has no store (global admin),
+    # fall back to the store_id from their role assignment
+    if store_id is None and is_mgr_or_admin:
+        role_with_store = db.query(UserRoles).filter(
+            UserRoles.user_id == current_user.id,
+            UserRoles.store_id.isnot(None),
+        ).first()
+        if role_with_store:
+            store_id = role_with_store.store_id
+
+    if store_id is None and explicit_store_id:
+        store_id = explicit_store_id
+
+    if store_id is None and is_mgr_or_admin:
+        return _create_error_output(db, ai_input, "No store associated with this account. Please contact a system administrator.")
 
     # 2. Build context based on role
-    context = {"employee": employee_ctx}
+    context = {}
+    if employee_ctx:
+        context["employee"] = employee_ctx
 
     if is_mgr_or_admin:
         store_ctx = load_store_context(db, store_id)

@@ -241,6 +241,79 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
             _merge_adjacent_same_type(db, employee_id, day)
 
 
+def _merge_adjacent_coverage(db: Session, store_id: int, department_id: int, day: int) -> None:
+    """Merge adjacent coverage rules that have identical staff counts."""
+    db.flush()
+    rules = db.query(CoverageRequirements).filter(
+        CoverageRequirements.store_id == store_id,
+        CoverageRequirements.department_id == department_id,
+        CoverageRequirements.day_of_week == day,
+        CoverageRequirements.active == True,
+    ).all()
+
+    if len(rules) < 2:
+        return
+
+    def _start(r: CoverageRequirements) -> int:
+        return 0 if r.start_time_local is None else r.start_time_local.hour * 60 + r.start_time_local.minute
+
+    def _end(r: CoverageRequirements) -> int:
+        return 1440 if r.end_time_local is None else r.end_time_local.hour * 60 + r.end_time_local.minute
+
+    sorted_rules = sorted(rules, key=_start)
+    i = 0
+    while i < len(sorted_rules) - 1:
+        cur = sorted_rules[i]
+        nxt = sorted_rules[i + 1]
+        if (cur.min_staff == nxt.min_staff and cur.max_staff == nxt.max_staff
+                and _end(cur) == _start(nxt)):
+            cur.end_time_local = nxt.end_time_local
+            nxt.active = False
+            sorted_rules.pop(i + 1)
+        else:
+            i += 1
+
+
+def _merge_adjacent_role_requirements(db: Session, store_id: int, department_id: Optional[int], day: Optional[int]) -> None:
+    """Merge adjacent role requirement rules with identical role flags."""
+    db.flush()
+    query = db.query(RoleRequirements).filter(
+        RoleRequirements.store_id == store_id,
+        RoleRequirements.active == True,
+    )
+    if department_id is not None:
+        query = query.filter(RoleRequirements.department_id == department_id)
+    if day is None:
+        query = query.filter(RoleRequirements.day_of_week.is_(None))
+    else:
+        query = query.filter(RoleRequirements.day_of_week == day)
+    rules = query.all()
+
+    if len(rules) < 2:
+        return
+
+    def _start(r: RoleRequirements) -> int:
+        return 0 if r.start_time_local is None else r.start_time_local.hour * 60 + r.start_time_local.minute
+
+    def _end(r: RoleRequirements) -> int:
+        return 1440 if r.end_time_local is None else r.end_time_local.hour * 60 + r.end_time_local.minute
+
+    sorted_rules = sorted(rules, key=_start)
+    i = 0
+    while i < len(sorted_rules) - 1:
+        cur = sorted_rules[i]
+        nxt = sorted_rules[i + 1]
+        if (cur.requires_keyholder == nxt.requires_keyholder
+                and cur.requires_manager == nxt.requires_manager
+                and cur.min_manager_count == nxt.min_manager_count
+                and _end(cur) == _start(nxt)):
+            cur.end_time_local = nxt.end_time_local
+            nxt.active = False
+            sorted_rules.pop(i + 1)
+        else:
+            i += 1
+
+
 def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None:
     """Apply coverage requirement changes."""
     store_id = result["store_id"]
@@ -251,10 +324,11 @@ def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None
         action = change["action"]
 
         if action == "ADD":
+            day = change["day_of_week"]
             req = CoverageRequirements(
                 store_id=store_id,
                 department_id=department_id,
-                day_of_week=change["day_of_week"],
+                day_of_week=day,
                 start_time_local=_parse_time(change["start_time"]),
                 end_time_local=_parse_time(change["end_time"]),
                 min_staff=change["min_staff"],
@@ -263,6 +337,7 @@ def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None
                 last_modified_by_user_id=approved_by,
             )
             db.add(req)
+            _merge_adjacent_coverage(db, store_id, department_id, day)
 
         elif action == "REMOVE":
             cov_id = change.get("coverage_id")
@@ -292,6 +367,7 @@ def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None
                     if "end_time" in change:
                         req.end_time_local = _parse_time(change["end_time"])
                     req.last_modified_by_user_id = approved_by
+                    _merge_adjacent_coverage(db, store_id, department_id, req.day_of_week)
 
 
 def _apply_role_requirement_changes(db: Session, result: dict, approved_by: int) -> None:
@@ -304,10 +380,11 @@ def _apply_role_requirement_changes(db: Session, result: dict, approved_by: int)
         action = change["action"]
 
         if action == "ADD":
+            day = change.get("day_of_week")
             req = RoleRequirements(
                 store_id=store_id,
                 department_id=department_id,
-                day_of_week=change.get("day_of_week"),
+                day_of_week=day,
                 start_time_local=_parse_time(change["start_time"]),
                 end_time_local=_parse_time(change["end_time"]),
                 requires_keyholder=change.get("requires_keyholder", False),
@@ -316,6 +393,7 @@ def _apply_role_requirement_changes(db: Session, result: dict, approved_by: int)
                 active=True,
             )
             db.add(req)
+            _merge_adjacent_role_requirements(db, store_id, department_id, day)
 
         elif action == "REMOVE":
             req_id = change.get("role_requirement_id")
@@ -342,3 +420,4 @@ def _apply_role_requirement_changes(db: Session, result: dict, approved_by: int)
                         req.start_time_local = _parse_time(change["start_time"])
                     if "end_time" in change:
                         req.end_time_local = _parse_time(change["end_time"])
+                    _merge_adjacent_role_requirements(db, store_id, department_id, req.day_of_week)

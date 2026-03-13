@@ -10,7 +10,7 @@ class AIInputBase(BaseModel):
 
 class AIInputCreate(AIInputBase):
     """req_by_user_id is set from the authenticated user, not the payload"""
-    pass
+    store_id: Optional[int] = None  # explicit store context for admin requests
 
 
 class AIInputResponse(AIInputBase):
