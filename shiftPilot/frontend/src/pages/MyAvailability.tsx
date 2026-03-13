@@ -21,9 +21,9 @@ const DAY_LABELS_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 const RULE_STYLES = {
   [AvailabilityRuleType.AVAILABLE]: {
-    bg: "bg-blue-100",
-    border: "border-blue-300",
-    text: "text-blue-700",
+    bg: "bg-gray-100",
+    border: "border-gray-300",
+    text: "text-gray-600",
     label: "Available",
   },
   [AvailabilityRuleType.PREFERRED]: {
@@ -77,6 +77,43 @@ function timeToHours(timeStr: string | null): number {
   return h + m / 60;
 }
 
+function hoursToTimeStr(h: number): string {
+  const hours = Math.floor(h);
+  const mins = Math.round((h - hours) * 60);
+  return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
+}
+
+function mergeAdjacentRules(rules: ParsedRule[]): ParsedRule[] {
+  if (rules.length < 2) return rules;
+  const sorted = [...rules].sort((a, b) => a.startHour - b.startHour);
+  const result: ParsedRule[] = [];
+  let cur = { ...sorted[0] };
+  for (let i = 1; i < sorted.length; i++) {
+    const nxt = sorted[i];
+    if (nxt.ruleType === cur.ruleType && nxt.startHour === cur.endHour) {
+      cur = { ...cur, endHour: nxt.endHour, endStr: nxt.endStr, isFullDay: cur.startHour === 0 && nxt.endHour === 24 };
+    } else {
+      result.push(cur);
+      cur = { ...nxt };
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function computeGaps(rules: ParsedRule[]): Array<{ startHour: number; endHour: number }> {
+  if (rules.length === 0) return [];
+  const sorted = [...rules].sort((a, b) => a.startHour - b.startHour);
+  const gaps: Array<{ startHour: number; endHour: number }> = [];
+  let cursor = GRID_START;
+  for (const rule of sorted) {
+    if (rule.startHour > cursor) gaps.push({ startHour: cursor, endHour: rule.startHour });
+    cursor = Math.max(cursor, rule.endHour);
+  }
+  if (cursor < GRID_END) gaps.push({ startHour: cursor, endHour: GRID_END });
+  return gaps;
+}
+
 // ── Types ────────────────────────────────────────────────────────────
 
 interface ParsedRule {
@@ -94,10 +131,76 @@ interface EnrichedProposal extends AIProposalResponse {
   summary?: string;
 }
 
+interface PendingOverlayRule {
+  dayOfWeek: number;
+  startHour: number;
+  endHour: number;
+  ruleType: AvailabilityRuleType;
+  isPreview: boolean; // true = unsaved form row, false = submitted pending proposal
+}
 
-// ── Manual Edit Modal ────────────────────────────────────────────────
+const DEFAULT_FORM_ROW: ManualChange = {
+  day_of_week: 0, start_time: "09:00", end_time: "17:00",
+  rule_type: AvailabilityRuleType.AVAILABLE, all_day: false,
+};
+
+
+// ── Manual Edit Card ─────────────────────────────────────────────────
 
 const DAY_LABELS_FULL_MODAL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => ({
+  value: h,
+  label: is24Hour
+    ? h.toString().padStart(2, "0") + ":00"
+    : `${h % 12 || 12}${h >= 12 ? "pm" : "am"}`,
+}));
+
+const MINUTE_OPTIONS = [0, 15, 30, 45].map((m) => ({
+  value: m,
+  label: m.toString().padStart(2, "0"),
+}));
+
+function TimePicker({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  const [h, m] = value ? value.split(":").map(Number) : [9, 0];
+  const nearestM = [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - m) < Math.abs(a - m) ? b : a));
+
+  const update = (newH: number, newM: number) => {
+    onChange(`${newH.toString().padStart(2, "0")}:${newM.toString().padStart(2, "0")}`);
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        className={className}
+        value={h}
+        onChange={(e) => update(Number(e.target.value), nearestM)}
+      >
+        {HOUR_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <select
+        className={className}
+        value={nearestM}
+        onChange={(e) => update(h, Number(e.target.value))}
+      >
+        {MINUTE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 const RULE_TYPE_OPTIONS = [
   { value: AvailabilityRuleType.AVAILABLE, label: "Available" },
   { value: AvailabilityRuleType.UNAVAILABLE, label: "Unavailable" },
@@ -120,39 +223,38 @@ interface ManualChangePayload {
   rule_type: AvailabilityRuleType;
 }
 
-function ManualEditModal({
+function ManualEditCard({
   onClose,
   onSubmit,
   submitting,
+  changes,
+  onChangesChange,
 }: {
   onClose: () => void;
   onSubmit: (changes: ManualChangePayload[], summary: string) => void;
   submitting: boolean;
+  changes: ManualChange[];
+  onChangesChange: (changes: ManualChange[]) => void;
 }) {
-  const [changes, setChanges] = useState<ManualChange[]>([
-    { day_of_week: 0, start_time: "09:00", end_time: "17:00", rule_type: AvailabilityRuleType.AVAILABLE, all_day: false },
-  ]);
-
   const addRow = () =>
-    setChanges((prev) => [
-      ...prev,
+    onChangesChange([
+      ...changes,
       { day_of_week: 0, start_time: "09:00", end_time: "17:00", rule_type: AvailabilityRuleType.AVAILABLE, all_day: false },
     ]);
 
-  const removeRow = (i: number) => setChanges((prev) => prev.filter((_, idx) => idx !== i));
+  const removeRow = (i: number) => onChangesChange(changes.filter((_, idx) => idx !== i));
 
   const updateRow = (i: number, patch: Partial<ManualChange>) =>
-    setChanges((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    onChangesChange(changes.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
-  const buildSummary = () => {
-    return changes
+  const buildSummary = () =>
+    changes
       .map((c) => {
         const day = DAY_LABELS_FULL_MODAL[c.day_of_week];
         const time = c.all_day ? "all day" : `${c.start_time}–${c.end_time}`;
         return `${c.rule_type.toLowerCase()} ${day} ${time}`;
       })
       .join(", ");
-  };
 
   const handleSubmit = () => {
     const payload: ManualChangePayload[] = changes.map((c) => ({
@@ -166,97 +268,89 @@ function ManualEditModal({
   };
 
   const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
-  const inputClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring w-24";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-2xl mx-4 p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Edit availability manually</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Changes will be submitted as a proposal for manager review.
-            </p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
-            <X size={16} />
-          </Button>
+    <div className="rounded-lg border bg-card p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Edit availability manually</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Changes will be submitted as a proposal for manager review.
+          </p>
         </div>
+        <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
+          <X size={16} />
+        </Button>
+      </div>
 
-        <div className="space-y-2">
-          {changes.map((row, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5 bg-muted/20">
-              {/* Day */}
-              <select
-                className={selectClass}
-                value={row.day_of_week}
-                onChange={(e) => updateRow(i, { day_of_week: Number(e.target.value) })}
-              >
-                {DAY_LABELS_FULL_MODAL.map((d, idx) => (
-                  <option key={idx} value={idx}>{d}</option>
-                ))}
-              </select>
+      <div className="space-y-2">
+        {changes.map((row, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5 bg-muted/20">
+            <select
+              className={selectClass}
+              value={row.day_of_week}
+              onChange={(e) => updateRow(i, { day_of_week: Number(e.target.value) })}
+            >
+              {DAY_LABELS_FULL_MODAL.map((d, idx) => (
+                <option key={idx} value={idx}>{d}</option>
+              ))}
+            </select>
 
-              {/* Rule type */}
-              <select
-                className={selectClass}
-                value={row.rule_type}
-                onChange={(e) => updateRow(i, { rule_type: e.target.value as AvailabilityRuleType })}
-              >
-                {RULE_TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+            <select
+              className={selectClass}
+              value={row.rule_type}
+              onChange={(e) => updateRow(i, { rule_type: e.target.value as AvailabilityRuleType })}
+            >
+              {RULE_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
 
-              {/* All day toggle */}
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={row.all_day}
-                  onChange={(e) => updateRow(i, { all_day: e.target.checked })}
-                  className="rounded"
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={row.all_day}
+                onChange={(e) => updateRow(i, { all_day: e.target.checked })}
+                className="rounded"
+              />
+              All day
+            </label>
+
+            {!row.all_day && (
+              <>
+                <TimePicker
+                  value={row.start_time ?? "09:00"}
+                  onChange={(v) => updateRow(i, { start_time: v })}
+                  className={selectClass}
                 />
-                All day
-              </label>
+                <span className="text-xs text-muted-foreground">to</span>
+                <TimePicker
+                  value={row.end_time ?? "17:00"}
+                  onChange={(v) => updateRow(i, { end_time: v })}
+                  className={selectClass}
+                />
+              </>
+            )}
 
-              {/* Time range */}
-              {!row.all_day && (
-                <>
-                  <input
-                    type="time"
-                    className={inputClass}
-                    value={row.start_time ?? ""}
-                    onChange={(e) => updateRow(i, { start_time: e.target.value })}
-                  />
-                  <span className="text-xs text-muted-foreground">to</span>
-                  <input
-                    type="time"
-                    className={inputClass}
-                    value={row.end_time ?? ""}
-                    onChange={(e) => updateRow(i, { end_time: e.target.value })}
-                  />
-                </>
-              )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto text-muted-foreground hover:text-destructive h-7 w-7"
+              onClick={() => removeRow(i)}
+              disabled={changes.length === 1}
+            >
+              <Trash2 size={13} />
+            </Button>
+          </div>
+        ))}
+      </div>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                className="ml-auto text-muted-foreground hover:text-destructive h-7 w-7"
-                onClick={() => removeRow(i)}
-                disabled={changes.length === 1}
-              >
-                <Trash2 size={13} />
-              </Button>
-            </div>
-          ))}
-        </div>
-
+      <div className="flex items-center justify-between">
         <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
           <Plus size={13} />
           Add row
         </Button>
-
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
@@ -333,8 +427,10 @@ export default function MyAvailability() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // Manual edit modal
+  // Manual edit card
   const [showManualEdit, setShowManualEdit] = useState(false);
+  const [showPending, setShowPending] = useState(true);
+  const [formChanges, setFormChanges] = useState<ManualChange[]>([{ ...DEFAULT_FORM_ROW }]);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
 
@@ -398,7 +494,7 @@ export default function MyAvailability() {
           id: r.id,
           dayOfWeek: r.day_of_week,
           startHour: isFullDay ? 0 : timeToHours(r.start_time_local),
-          endHour: isFullDay ? 24 : timeToHours(r.end_time_local),
+          endHour: isFullDay ? 24 : (timeToHours(r.end_time_local) || 24),
           startStr: r.start_time_local,
           endStr: r.end_time_local,
           ruleType: r.rule_type,
@@ -407,15 +503,44 @@ export default function MyAvailability() {
       });
   }, [rules]);
 
-  // Group by day
+  // Group by day, merging any adjacent same-type rules
   const rulesByDay = useMemo(() => {
     const map = new Map<number, ParsedRule[]>();
     for (let i = 0; i < 7; i++) map.set(i, []);
     for (const r of parsed) {
       map.get(r.dayOfWeek)?.push(r);
     }
+    for (const [day, rules] of map) {
+      map.set(day, mergeAdjacentRules(rules));
+    }
     return map;
   }, [parsed]);
+
+  // Pending overlay: form preview + submitted pending proposals
+  const pendingOverlayRules = useMemo<PendingOverlayRule[]>(() => {
+    const result: PendingOverlayRule[] = [];
+
+    if (showManualEdit) {
+      for (const c of formChanges) {
+        const startH = c.all_day ? 0 : timeToHours(c.start_time ?? "00:00");
+        const endH = c.all_day ? 24 : timeToHours(c.end_time ?? "24:00");
+        result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
+      }
+    }
+
+    for (const p of proposals) {
+      if (p.status !== ProposalStatus.PENDING) continue;
+      const cj = (p as AIProposalResponse & { changes_json?: { changes?: Array<{ day_of_week: number; start_time: string | null; end_time: string | null; rule_type: AvailabilityRuleType }> } }).changes_json;
+      if (!cj?.changes) continue;
+      for (const c of cj.changes) {
+        const startH = c.start_time ? timeToHours(c.start_time) : 0;
+        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: false });
+      }
+    }
+
+    return result;
+  }, [showManualEdit, formChanges, proposals]);
 
   const handleAiSubmit = async (text: string) => {
     if (!text.trim()) return;
@@ -460,6 +585,7 @@ export default function MyAvailability() {
     try {
       await aiProposalsApi.proposeManual(changes, summary);
       setShowManualEdit(false);
+      setFormChanges([{ ...DEFAULT_FORM_ROW }]);
       await refreshProposals();
     } catch {
       // could add toast here
@@ -507,25 +633,49 @@ export default function MyAvailability() {
         </Button>
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-xs">
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm bg-blue-100 border border-blue-300" />
-          <span className="text-muted-foreground">Available</span>
+      {/* Legend + pending toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          <div className="flex items-center gap-1.5">
+            <div className="w-4 h-3 rounded-sm bg-gray-100 border border-gray-300" />
+            <span className="text-muted-foreground">Available</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-4 h-3 rounded-sm bg-emerald-100 border border-emerald-300" />
+            <span className="text-muted-foreground">Preferred</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-4 h-3 rounded-sm border border-red-300 unavailable-swatch" />
+            <span className="text-muted-foreground">Unavailable</span>
+          </div>
+          {pendingOverlayRules.length > 0 && showPending && (
+            <div className="flex items-center gap-1.5">
+              <div className="w-4 h-3 rounded-sm bg-amber-100 border border-amber-400" />
+              <span className="text-muted-foreground">Pending</span>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm bg-emerald-100 border border-emerald-300" />
-          <span className="text-muted-foreground">Preferred</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm border border-red-300 unavailable-swatch" />
-          <span className="text-muted-foreground">Unavailable</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm border border-border bg-muted/30" />
-          <span className="text-muted-foreground">No rules (available all day)</span>
-        </div>
+        {pendingOverlayRules.length > 0 && (
+          <Button
+            variant={showPending ? "secondary" : "outline"}
+            size="sm"
+            className="text-xs h-7 px-2.5"
+            onClick={() => setShowPending((v) => !v)}
+          >
+            {showPending ? "Hide pending" : "Show pending"}
+          </Button>
+        )}
       </div>
+
+      {showManualEdit && (
+        <ManualEditCard
+          onClose={() => { setShowManualEdit(false); setFormChanges([{ ...DEFAULT_FORM_ROW }]); }}
+          onSubmit={handleManualSubmit}
+          submitting={manualSubmitting}
+          changes={formChanges}
+          onChangesChange={setFormChanges}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
@@ -533,8 +683,8 @@ export default function MyAvailability() {
         </div>
       ) : (
         <>
-          <AvailabilityGrid rulesByDay={rulesByDay} />
-          <CompactAvailability rulesByDay={rulesByDay} />
+          <AvailabilityGrid rulesByDay={rulesByDay} pendingRules={showPending ? pendingOverlayRules : []} />
+          <CompactAvailability rulesByDay={rulesByDay} pendingRules={showPending ? pendingOverlayRules : []} />
         </>
       )}
 
@@ -624,15 +774,6 @@ export default function MyAvailability() {
         </Card>
       )}
 
-      {/* Manual edit modal */}
-      {showManualEdit && (
-        <ManualEditModal
-          onClose={() => setShowManualEdit(false)}
-          onSubmit={handleManualSubmit}
-          submitting={manualSubmitting}
-        />
-      )}
-
       {/* Clarification dialog */}
       {showClarify && (
         <ClarifyDialog
@@ -647,7 +788,7 @@ export default function MyAvailability() {
 
 // ── Grid View ────────────────────────────────────────────────────────
 
-function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]> }) {
+function AvailabilityGrid({ rulesByDay, pendingRules }: { rulesByDay: Map<number, ParsedRule[]>; pendingRules: PendingOverlayRule[] }) {
   const hourLabels = Array.from({ length: GRID_HOURS / 2 + 1 }, (_, i) => GRID_START + i * 2).filter(
     (h) => h < GRID_END
   );
@@ -702,35 +843,83 @@ function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]
                   );
                 })}
 
-                {!hasRules && (
-                  <div className="absolute top-1.5 bottom-1.5 left-0 right-6 rounded-md bg-muted/40 border border-border/60 flex items-center justify-center">
-                    <span className="text-xs text-muted-foreground">All day</span>
-                  </div>
-                )}
+                {(() => {
+                  const blockingRules = dayRules.filter(r => r.ruleType !== AvailabilityRuleType.AVAILABLE);
+                  const availRegions = blockingRules.length === 0 ? [] : computeGaps(blockingRules);
+                  const s = RULE_STYLES[AvailabilityRuleType.AVAILABLE];
+                  return (
+                    <>
+                      {blockingRules.length === 0 && (
+                        <div className="absolute top-1.5 bottom-1.5 left-0 right-0 rounded-md bg-gray-100 border border-gray-300 flex items-center justify-center">
+                          <span className="text-xs font-semibold text-gray-600">All day available</span>
+                        </div>
+                      )}
+                      {availRegions.map((seg, i) => {
+                        const left = ((seg.startHour - GRID_START) / GRID_HOURS) * 100;
+                        const width = ((seg.endHour - seg.startHour) / GRID_HOURS) * 100;
+                        const label = `${formatRuleTime(hoursToTimeStr(seg.startHour))} – ${formatRuleTime(hoursToTimeStr(seg.endHour))}`;
+                        return (
+                          <div
+                            key={`avail-${i}`}
+                            className={cn("absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden", s.border, s.bg)}
+                            style={{ left: `${left}%`, width: `${width}%` }}
+                            title={`Available: ${label}`}
+                          >
+                            <span className={cn("text-xs font-semibold truncate", s.text)}>
+                              {label}
+                              <span className="ml-1.5 font-normal opacity-70">Available</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {blockingRules.map((rule) => {
+                        const left = ((rule.startHour - GRID_START) / GRID_HOURS) * 100;
+                        const width = ((rule.endHour - rule.startHour) / GRID_HOURS) * 100;
+                        const style = RULE_STYLES[rule.ruleType];
+                        const timeLabel = rule.isFullDay ? "All day" : `${formatRuleTime(rule.startStr)} – ${formatRuleTime(rule.endStr)}`;
+                        return (
+                          <div
+                            key={rule.id}
+                            className={cn(
+                              "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
+                              style.border,
+                              rule.ruleType === AvailabilityRuleType.UNAVAILABLE ? "unavailable-block" : style.bg
+                            )}
+                            style={{ left: `${left}%`, width: `${width}%` }}
+                            title={`${style.label}: ${timeLabel}`}
+                          >
+                            <span className={cn("text-xs font-medium truncate", style.text)}>
+                              {timeLabel}
+                              <span className="ml-1.5 font-normal opacity-70">{style.label}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
 
-                {dayRules.map((rule) => {
-                  const left = ((rule.startHour - GRID_START) / GRID_HOURS) * 100;
-                  const width = ((rule.endHour - rule.startHour) / GRID_HOURS) * 100;
-                  const style = RULE_STYLES[rule.ruleType];
-                  const isUnavailable = rule.ruleType === AvailabilityRuleType.UNAVAILABLE;
-                  const timeLabel = rule.isFullDay
-                    ? "All day"
-                    : `${formatRuleTime(rule.startStr)} – ${formatRuleTime(rule.endStr)}`;
-
+                {pendingRules.filter((pr) => pr.dayOfWeek === dayIdx).map((pr, i) => {
+                  const left = ((pr.startHour - GRID_START) / GRID_HOURS) * 100;
+                  const width = ((pr.endHour - pr.startHour) / GRID_HOURS) * 100;
+                  const timeLabel = `${formatRuleTime(hoursToTimeStr(pr.startHour))} – ${formatRuleTime(hoursToTimeStr(pr.endHour))}`;
+                  const typeLabel = RULE_STYLES[pr.ruleType].label;
                   return (
                     <div
-                      key={rule.id}
+                      key={`pending-${i}`}
                       className={cn(
-                        "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
-                        style.border,
-                        isUnavailable ? "unavailable-block" : style.bg
+                        "absolute top-0.5 bottom-0.5 rounded-md border flex flex-col justify-center px-2 overflow-hidden opacity-85",
+                        pr.isPreview
+                          ? "bg-amber-50 border-amber-400 border-dashed"
+                          : "bg-amber-100 border-amber-500"
                       )}
                       style={{ left: `${left}%`, width: `${width}%` }}
-                      title={`${style.label}: ${timeLabel}`}
+                      title={`Pending: ${typeLabel} ${timeLabel}`}
                     >
-                      <span className={cn("text-xs font-medium truncate", style.text)}>
+                      <span className="text-[9px] font-semibold text-amber-600 leading-none truncate">Pending</span>
+                      <span className="text-xs font-medium text-amber-800 truncate leading-tight mt-0.5">
                         {timeLabel}
-                        <span className="ml-1.5 font-normal opacity-70">{style.label}</span>
+                        <span className="ml-1 font-normal opacity-70">· {typeLabel}</span>
                       </span>
                     </div>
                   );
@@ -746,7 +935,7 @@ function AvailabilityGrid({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]
 
 // ── Compact View ─────────────────────────────────────────────────────
 
-function CompactAvailability({ rulesByDay }: { rulesByDay: Map<number, ParsedRule[]> }) {
+function CompactAvailability({ rulesByDay, pendingRules }: { rulesByDay: Map<number, ParsedRule[]>; pendingRules: PendingOverlayRule[] }) {
   return (
     <div className="lg:hidden space-y-2">
       {Array.from({ length: 7 }, (_, dayIdx) => {
@@ -761,46 +950,66 @@ function CompactAvailability({ rulesByDay }: { rulesByDay: Map<number, ParsedRul
               </span>
             </div>
 
-            {!hasRules ? (
-              <div className="rounded-md bg-muted/40 border border-border/60 px-3 py-2">
-                <span className="text-xs text-muted-foreground">Available all day</span>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {dayRules.map((rule) => {
-                  const style = RULE_STYLES[rule.ruleType];
-                  const isUnavailable = rule.ruleType === AvailabilityRuleType.UNAVAILABLE;
-                  const timeLabel = rule.isFullDay
-                    ? "All day"
-                    : `${formatRuleTime(rule.startStr)} – ${formatRuleTime(rule.endStr)}`;
+            {(() => {
+              const blockingRules = dayRules.filter(r => r.ruleType !== AvailabilityRuleType.AVAILABLE);
+              if (blockingRules.length === 0) {
+                return (
+                  <div className="rounded-md bg-gray-100 border border-gray-300 px-3 py-2">
+                    <span className="text-xs font-semibold text-gray-600">All day available</span>
+                  </div>
+                );
+              }
+              type Segment = { startHour: number; kind: "avail"; endHour: number } | { startHour: number; kind: "rule"; rule: ParsedRule };
+              const segments: Segment[] = [
+                ...computeGaps(blockingRules).map(seg => ({ startHour: seg.startHour, endHour: seg.endHour, kind: "avail" as const })),
+                ...blockingRules.map(rule => ({ startHour: rule.startHour, kind: "rule" as const, rule })),
+              ].sort((a, b) => a.startHour - b.startHour);
+              return (
+                <div className="space-y-1.5">
+                  {segments.map((seg, i) => {
+                    if (seg.kind === "avail") {
+                      const label = `${formatRuleTime(hoursToTimeStr(seg.startHour))} – ${formatRuleTime(hoursToTimeStr(seg.endHour))}`;
+                      return (
+                        <div key={`avail-${i}`} className={cn("w-full rounded-md border px-3 py-2 flex items-center justify-between", RULE_STYLES[AvailabilityRuleType.AVAILABLE].border, RULE_STYLES[AvailabilityRuleType.AVAILABLE].bg)}>
+                          <span className={cn("text-xs font-semibold", RULE_STYLES[AvailabilityRuleType.AVAILABLE].text)}>{label}</span>
+                          <Badge className="text-[10px] bg-gray-100 text-gray-600 border-gray-300">Available</Badge>
+                        </div>
+                      );
+                    }
+                    const { rule } = seg;
+                    const style = RULE_STYLES[rule.ruleType];
+                    const isUnavailable = rule.ruleType === AvailabilityRuleType.UNAVAILABLE;
+                    const timeLabel = rule.isFullDay ? "All day" : `${formatRuleTime(rule.startStr)} – ${formatRuleTime(rule.endStr)}`;
+                    return (
+                      <div key={rule.id} className={cn("w-full rounded-md border px-3 py-2 flex items-center justify-between", style.border, isUnavailable ? "unavailable-block" : style.bg)}>
+                        <span className={cn("text-xs font-medium", style.text)}>{timeLabel}</span>
+                        <Badge className={cn("text-[10px]", isUnavailable ? "bg-red-100 text-red-700 border-red-300" : "bg-emerald-100 text-emerald-700 border-emerald-300")}>{style.label}</Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
-                  return (
-                    <div
-                      key={rule.id}
-                      className={cn(
-                        "w-full rounded-md border px-3 py-2 flex items-center justify-between",
-                        style.border,
-                        isUnavailable ? "unavailable-block" : style.bg
-                      )}
-                    >
-                      <span className={cn("text-xs font-medium", style.text)}>{timeLabel}</span>
-                      <Badge
-                        className={cn(
-                          "text-[10px]",
-                          isUnavailable
-                            ? "bg-red-100 text-red-700 border-red-300"
-                            : rule.ruleType === AvailabilityRuleType.PREFERRED
-                              ? "bg-emerald-100 text-emerald-700 border-emerald-300"
-                              : "bg-blue-100 text-blue-700 border-blue-300"
-                        )}
-                      >
-                        {style.label}
-                      </Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {pendingRules.filter((pr) => pr.dayOfWeek === dayIdx).map((pr, i) => {
+              const timeLabel = `${formatRuleTime(hoursToTimeStr(pr.startHour))} – ${formatRuleTime(hoursToTimeStr(pr.endHour))}`;
+              const typeLabel = RULE_STYLES[pr.ruleType].label;
+              return (
+                <div
+                  key={`pending-${i}`}
+                  className={cn(
+                    "mt-1.5 w-full rounded-md border px-3 py-2",
+                    pr.isPreview ? "bg-amber-50 border-amber-400 border-dashed" : "bg-amber-100 border-amber-500"
+                  )}
+                >
+                  <p className="text-[10px] font-semibold text-amber-600 leading-none mb-1">Pending</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-amber-800">{timeLabel}</span>
+                    <span className="text-xs text-amber-700 opacity-70">· {typeLabel}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })}

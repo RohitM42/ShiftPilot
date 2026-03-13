@@ -153,6 +153,41 @@ def _resolve_conflicts(
             ))
 
 
+def _merge_adjacent_same_type(db: Session, employee_id: int, day: int) -> None:
+    """
+    After inserting a new rule, merge any adjacent active rules of the same type on the same day.
+    e.g. 9am-5pm AVAILABLE touching 5pm-midnight AVAILABLE → 9am-midnight AVAILABLE.
+    """
+    db.flush()  # ensure newly-added rules are visible to the query
+    rules = db.query(AvailabilityRules).filter(
+        AvailabilityRules.employee_id == employee_id,
+        AvailabilityRules.day_of_week == day,
+        AvailabilityRules.active == True,
+    ).all()
+
+    if len(rules) < 2:
+        return
+
+    def _start(r: AvailabilityRules) -> int:
+        return 0 if r.start_time_local is None else r.start_time_local.hour * 60 + r.start_time_local.minute
+
+    def _end(r: AvailabilityRules) -> int:
+        return 1440 if r.end_time_local is None else r.end_time_local.hour * 60 + r.end_time_local.minute
+
+    sorted_rules = sorted(rules, key=_start)
+
+    i = 0
+    while i < len(sorted_rules) - 1:
+        cur = sorted_rules[i]
+        nxt = sorted_rules[i + 1]
+        if cur.rule_type == nxt.rule_type and _end(cur) == _start(nxt):
+            cur.end_time_local = nxt.end_time_local
+            nxt.active = False
+            sorted_rules.pop(i + 1)
+        else:
+            i += 1
+
+
 def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> None:
     """Apply availability rule changes."""
     employee_id = result["employee_id"]
@@ -176,6 +211,7 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
                 rule_type=rule_type,
                 active=True,
             ))
+            _merge_adjacent_same_type(db, employee_id, day)
 
         elif action == "REMOVE":
             query = db.query(AvailabilityRules).filter(
@@ -202,6 +238,7 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
                 rule_type=rule_type,
                 active=True,
             ))
+            _merge_adjacent_same_type(db, employee_id, day)
 
 
 def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None:

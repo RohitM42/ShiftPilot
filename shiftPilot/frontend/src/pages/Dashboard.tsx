@@ -1,6 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Calendar, Clock, ClipboardCheck, Users } from "lucide-react";
+import { Calendar, Clock, ClipboardCheck, Users, CalendarDays, BookOpen } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export default function Dashboard() {
@@ -50,6 +50,34 @@ export default function Dashboard() {
 
         {isManagerOrAdmin && (
           <>
+            <Link to="/schedule">
+              <Card className="transition-shadow hover:shadow-md cursor-pointer">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Schedule
+                  </CardTitle>
+                  <CalendarDays size={18} className="text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <p className="text-lg font-semibold">Generate & publish shifts</p>
+                </CardContent>
+              </Card>
+            </Link>
+
+            <Link to="/scheduling-rules">
+              <Card className="transition-shadow hover:shadow-md cursor-pointer">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Scheduling Rules
+                  </CardTitle>
+                  <BookOpen size={18} className="text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <p className="text-lg font-semibold">Manage coverage & roles</p>
+                </CardContent>
+              </Card>
+            </Link>
+
             <Link to="/proposals">
               <Card className="transition-shadow hover:shadow-md cursor-pointer">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
