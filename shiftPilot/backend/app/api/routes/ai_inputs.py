@@ -32,7 +32,7 @@ def create_ai_input(
     db.flush()  # get id before processing
 
     try:
-        ai_output = process_ai_input(db, ai_input, current_user, explicit_store_id=payload.store_id)
+        ai_output = process_ai_input(db, ai_input, current_user, explicit_store_id=payload.store_id, as_preview=payload.as_preview)
     except Exception as e:
         db.rollback()
         raise HTTPException(

@@ -11,6 +11,7 @@ class AIInputBase(BaseModel):
 class AIInputCreate(AIInputBase):
     """req_by_user_id is set from the authenticated user, not the payload"""
     store_id: Optional[int] = None  # explicit store context for admin requests
+    as_preview: bool = False         # if True, process LLM but don't create AIProposal yet
 
 
 class AIInputResponse(AIInputBase):

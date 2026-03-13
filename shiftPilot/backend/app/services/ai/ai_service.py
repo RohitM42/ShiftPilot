@@ -36,7 +36,7 @@ INTENT_TO_PROPOSAL_TYPE = {
 }
 
 
-def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, explicit_store_id: Optional[int] = None) -> AIOutputs:
+def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, explicit_store_id: Optional[int] = None, as_preview: bool = False) -> AIOutputs:
     """
     Main entry point. Processes an AI input and creates output + proposal.
 
@@ -156,18 +156,18 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, expli
     db.add(ai_output)
     db.flush()  # get ai_output.id without committing
 
-    # 7. Create proposal
-    proposal_type = INTENT_TO_PROPOSAL_TYPE[intent_type]
-
-    proposal = AIProposals(
-        ai_output_id=ai_output.id,
-        source=ProposalSource.AI,
-        type=proposal_type,
-        store_id=result.get("store_id", store_id),
-        department_id=result.get("department_id"),
-        status=ProposalStatus.PENDING,
-    )
-    db.add(proposal)
+    # 7. Create proposal (skipped when as_preview=True — user must confirm via /from-output)
+    if not as_preview:
+        proposal_type = INTENT_TO_PROPOSAL_TYPE[intent_type]
+        proposal = AIProposals(
+            ai_output_id=ai_output.id,
+            source=ProposalSource.AI,
+            type=proposal_type,
+            store_id=result.get("store_id", store_id),
+            department_id=result.get("department_id"),
+            status=ProposalStatus.PENDING,
+        )
+        db.add(proposal)
 
     # 8. Mark input processed
     ai_input.processed = True

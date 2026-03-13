@@ -79,6 +79,66 @@ def create_ai_proposal(
     return proposal
 
 
+@router.post("/from-output/{output_id}", response_model=AIProposalResponse, status_code=status.HTTP_201_CREATED)
+def confirm_preview_proposal(
+    output_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Convert a preview AIOutput into a real PENDING AIProposal.
+    Only the user who generated the output (or a manager/admin) can confirm it.
+    Fails if a proposal already exists for this output.
+    """
+    output = db.query(AIOutputs).filter(AIOutputs.id == output_id).first()
+    if not output:
+        raise HTTPException(status_code=404, detail="AI output not found")
+
+    # Ownership check
+    ai_input = db.query(AIInputs).filter(AIInputs.id == output.input_id).first()
+    if not ai_input:
+        raise HTTPException(status_code=404, detail="AI input not found")
+    if ai_input.req_by_user_id != current_user.id and not is_manager_or_admin(db, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to confirm this proposal")
+
+    # Guard against double-confirm
+    existing = db.query(AIProposals).filter(AIProposals.ai_output_id == output_id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="A proposal already exists for this output")
+
+    result = output.result_json or {}
+    intent_type = result.get("intent_type")
+    type_map = {
+        "AVAILABILITY": ProposalType.AVAILABILITY,
+        "COVERAGE": ProposalType.COVERAGE,
+        "ROLE_REQUIREMENT": ProposalType.ROLE_REQUIREMENT,
+    }
+    proposal_type = type_map.get(intent_type)
+    if not proposal_type:
+        raise HTTPException(status_code=422, detail=f"Cannot create proposal for intent type: {intent_type}")
+
+    # AVAILABILITY results don't include store_id in the schema — derive from employee
+    from app.db.models.employees import Employees
+    resolved_store_id = result.get("store_id")
+    if resolved_store_id is None:
+        emp_user_id = output.affects_user_id or ai_input.req_by_user_id
+        emp = db.query(Employees).filter(Employees.user_id == emp_user_id).first()
+        if emp:
+            resolved_store_id = emp.store_id
+
+    proposal = AIProposals(
+        ai_output_id=output_id,
+        source=ProposalSource.AI,
+        type=proposal_type,
+        store_id=resolved_store_id,
+        department_id=result.get("department_id"),
+        status=ProposalStatus.PENDING,
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
+
 @router.get("/pending", response_model=List[AIProposalResponse])
 def list_pending_proposals(
     type: Optional[ProposalType] = Query(None),

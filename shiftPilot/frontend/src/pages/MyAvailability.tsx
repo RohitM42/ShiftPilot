@@ -434,6 +434,14 @@ export default function MyAvailability() {
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
 
+  // AI preview confirmation
+  const [aiPreview, setAiPreview] = useState<{
+    outputId: number;
+    summary: string;
+    changes: Array<{ day_of_week: number; start_time: string | null; end_time: string | null; rule_type: AvailabilityRuleType }>;
+  } | null>(null);
+  const [confirmingSend, setConfirmingSend] = useState(false);
+
   // Clarification dialog
   const [showClarify, setShowClarify] = useState(false);
   const [originalText, setOriginalText] = useState("");
@@ -539,8 +547,16 @@ export default function MyAvailability() {
       }
     }
 
+    if (aiPreview) {
+      for (const c of aiPreview.changes) {
+        const startH = c.start_time ? timeToHours(c.start_time) : 0;
+        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
+      }
+    }
+
     return result;
-  }, [showManualEdit, formChanges, proposals]);
+  }, [showManualEdit, formChanges, proposals, aiPreview]);
 
   const handleAiSubmit = async (text: string) => {
     if (!text.trim()) return;
@@ -549,21 +565,25 @@ export default function MyAvailability() {
     setAiError(null);
 
     try {
-      const res = await aiInputsApi.create(text.trim(), ["availability_rules"]);
+      const res = await aiInputsApi.create(text.trim(), ["availability_rules"], undefined, true);
       const summary: string = res.data.summary ?? "";
-
-      const isUnclear =
-        summary.toLowerCase().includes("unclear") ||
-        res.data.status === "INVALID";
+      const isUnclear = summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
 
       if (isUnclear) {
         setOriginalText(text.trim());
         setShowClarify(true);
         setAiText("");
       } else {
-        setAiResult(summary);
+        // Enter preview mode — show the proposed changes before submitting
+        const changes = (res.data.result_json?.changes ?? []) as Array<{
+          day_of_week: number;
+          start_time: string | null;
+          end_time: string | null;
+          rule_type: AvailabilityRuleType;
+        }>;
+        setAiPreview({ outputId: res.data.id, summary, changes });
+        setShowPending(true);
         setAiText("");
-        await refreshProposals();
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -571,6 +591,26 @@ export default function MyAvailability() {
     } finally {
       setAiSending(false);
     }
+  };
+
+  const handleConfirmProposal = async () => {
+    if (!aiPreview) return;
+    setConfirmingSend(true);
+    try {
+      await aiProposalsApi.confirmPreview(aiPreview.outputId);
+      setAiPreview(null);
+      setAiResult(aiPreview.summary);
+      await refreshProposals();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAiError(msg ?? "Failed to send proposal");
+    } finally {
+      setConfirmingSend(false);
+    }
+  };
+
+  const handleDiscardPreview = () => {
+    setAiPreview(null);
   };
 
   const handleClarifyConfirm = async (clarification: string) => {
@@ -627,7 +667,12 @@ export default function MyAvailability() {
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowManualEdit(true)}>
+        <Button
+          variant={showManualEdit ? "secondary" : "outline"}
+          size="sm"
+          className="gap-1.5"
+          onClick={() => { setShowManualEdit((v) => !v); if (showManualEdit) setFormChanges([{ ...DEFAULT_FORM_ROW }]); }}
+        >
           <Pencil size={14} />
           Edit manually
         </Button>
@@ -704,19 +749,50 @@ export default function MyAvailability() {
               onKeyDown={handleKeyDown}
               placeholder='e.g. "I cannot work Saturdays anymore" or "I would prefer morning shifts on Wednesdays"'
               rows={2}
-              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
+              disabled={aiPreview != null}
+              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none disabled:opacity-50"
             />
             <Button
               size="icon"
               className="shrink-0 self-end"
               onClick={() => handleAiSubmit(aiText)}
-              disabled={!aiText.trim() || aiSending}
+              disabled={!aiText.trim() || aiSending || aiPreview != null}
             >
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
 
-          {aiResult && (
+          {aiPreview && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 space-y-1">
+                  <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Preview — not yet submitted</p>
+                  <p className="text-sm text-amber-900">{aiPreview.summary}</p>
+                  <p className="text-xs text-amber-700">The amber blocks on the grid show what this change would look like.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleConfirmProposal}
+                  disabled={confirmingSend}
+                >
+                  {confirmingSend ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  Send proposal
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDiscardPreview}
+                  disabled={confirmingSend}
+                >
+                  Discard
+                </Button>
+              </div>
+            </div>
+          )}
+          {!aiPreview && aiResult && (
             <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-800">
               {aiResult}
             </div>
@@ -882,6 +958,7 @@ function AvailabilityGrid({ rulesByDay, pendingRules }: { rulesByDay: Map<number
                             key={rule.id}
                             className={cn(
                               "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
+                              rule.isFullDay && "justify-center",
                               style.border,
                               rule.ruleType === AvailabilityRuleType.UNAVAILABLE ? "unavailable-block" : style.bg
                             )}
