@@ -256,22 +256,21 @@ function ManualSchedulingModal({
     "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring w-24";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-3xl mx-4 p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold">Edit scheduling rules manually</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Changes will be submitted as proposals for review.
-            </p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
-            <X size={16} />
-          </Button>
+    <div className="rounded-lg border bg-card p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Edit scheduling rules manually</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Changes will be submitted as proposals for review.
+          </p>
         </div>
+        <Button variant="ghost" size="icon" onClick={onClose} disabled={submitting}>
+          <X size={16} />
+        </Button>
+      </div>
 
-        <div className="space-y-2">
-          {rows.map((row) => (
+      <div className="space-y-2">
+        {rows.map((row) => (
             <div
               key={row.id}
               className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2.5 bg-muted/20"
@@ -390,12 +389,12 @@ function ManualSchedulingModal({
           ))}
         </div>
 
+      <div className="flex items-center justify-between">
         <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
           <Plus size={13} />
           Add row
         </Button>
-
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
@@ -1221,10 +1220,10 @@ export default function SchedulingRules() {
             ))}
           </select>
           <Button
-            variant="outline"
+            variant={showManualEdit ? "secondary" : "outline"}
             size="sm"
             className="gap-1.5"
-            onClick={() => setShowManualEdit(true)}
+            onClick={() => setShowManualEdit((v) => !v)}
             disabled={storeId == null}
           >
             <Pencil size={14} />
@@ -1250,6 +1249,16 @@ export default function SchedulingRules() {
           </button>
         ))}
       </div>
+
+      {showManualEdit && storeId != null && (
+        <ManualSchedulingModal
+          storeId={storeId}
+          departments={departments}
+          onClose={() => setShowManualEdit(false)}
+          onSubmit={handleManualSubmit}
+          submitting={manualSubmitting}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
@@ -1438,17 +1447,6 @@ export default function SchedulingRules() {
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {/* Manual edit modal */}
-      {showManualEdit && storeId != null && (
-        <ManualSchedulingModal
-          storeId={storeId}
-          departments={departments}
-          onClose={() => setShowManualEdit(false)}
-          onSubmit={handleManualSubmit}
-          submitting={manualSubmitting}
-        />
       )}
 
       {/* Clarify dialog */}
