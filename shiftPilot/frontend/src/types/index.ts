@@ -247,6 +247,14 @@ export interface Department {
   code: string;
 }
 
+export interface DepartmentResponse {
+  id: number;
+  name: string;
+  code: string;
+  has_manager_role: boolean;
+  active: boolean;
+}
+
 // Stores (inferred from seed data)
 
 export interface Store {
@@ -254,6 +262,30 @@ export interface Store {
   name: string;
   location: string;
   timezone: string;
+}
+
+export interface StoreResponse {
+  id: number;
+  name: string;
+  location: string;
+  timezone: string;
+}
+
+// Store Departments
+
+export interface StoreDepartmentResponse {
+  store_id: number;
+  department_id: number;
+}
+
+// Labour Budgets
+
+export interface LabourBudgetResponse {
+  id: number;
+  store_id: number;
+  department_id: number;
+  week_start_date: string;
+  budget_hours: number;
 }
 
 // Schedule generation

@@ -162,6 +162,8 @@ export default function EmployeeManagement() {
     return m;
   }, [departments]);
 
+  const hasNoDepts = (empId: number): boolean => (empDepts.get(empId) ?? []).length === 0;
+
   return (
     <div className="space-y-4">
       <div>
@@ -248,6 +250,9 @@ export default function EmployeeManagement() {
                       <Badge variant={STATUS_VARIANT[emp.employment_status]}>
                         {STATUS_LABEL[emp.employment_status]}
                       </Badge>
+                      {hasNoDepts(emp.id) && (
+                        <Badge variant="warning">No Departments</Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                       <span>#{emp.id}</span>

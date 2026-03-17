@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Layout } from "@/components/Layout";
+import { Role } from "@/types";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import MyShifts from "@/pages/MyShifts";
@@ -13,6 +14,7 @@ import EmployeeEdit from "@/pages/EmployeeEdit";
 import ScheduleView from "@/pages/ScheduleView";
 import ScheduleSummaryView from "@/pages/ScheduleSummaryView";
 import ProposalView from "@/pages/ProposalView";
+import StoreManagement from "@/pages/admin/StoreManagement";
 
 function LoginGuard() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -91,6 +93,14 @@ export default function App() {
               element={
                 <ProtectedRoute requireManagerOrAdmin>
                   <EmployeeEdit />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/stores"
+              element={
+                <ProtectedRoute requiredRole={Role.ADMIN}>
+                  <StoreManagement />
                 </ProtectedRoute>
               }
             />

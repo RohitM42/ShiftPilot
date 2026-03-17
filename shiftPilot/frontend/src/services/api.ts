@@ -1,4 +1,10 @@
 import axios from "axios";
+import type {
+  StoreResponse,
+  StoreDepartmentResponse,
+  DepartmentResponse,
+  LabourBudgetResponse,
+} from "@/types";
 
 const API_BASE = "/api";
 
@@ -143,6 +149,36 @@ export const departmentsApi = {
   list: () => api.get("/departments"),
 };
 
+// Departments (admin)
+export const departmentsAdminApi = {
+  list: (includeInactive = false) =>
+    api.get<DepartmentResponse[]>('/departments', {
+      params: { include_inactive: includeInactive },
+    }),
+  create: (data: { name: string; code: string; has_manager_role: boolean }) =>
+    api.post<DepartmentResponse>('/departments', data),
+  update: (id: number, data: { name?: string; code?: string; has_manager_role?: boolean }) =>
+    api.put<DepartmentResponse>(`/departments/${id}`, data),
+  deactivate: (id: number) =>
+    api.delete<{ id: number; warnings: Array<{ employee_id: number; name: string }> }>(
+      `/departments/${id}`
+    ),
+};
+
+// Labour Budgets
+export const labourBudgetsApi = {
+  listForStore: (storeId: number) =>
+    api.get<LabourBudgetResponse[]>('/labour-budgets', { params: { store_id: storeId } }),
+  create: (data: {
+    store_id: number;
+    department_id: number;
+    week_start_date: string;
+    budget_hours: number;
+  }) => api.post<LabourBudgetResponse>('/labour-budgets', data),
+  update: (id: number, data: { budget_hours: number }) =>
+    api.put<LabourBudgetResponse>(`/labour-budgets/${id}`, data),
+};
+
 // User Roles
 export const userRolesApi = {
   getForUser: (userId: number) => api.get(`/user-roles/user/${userId}`),
@@ -150,7 +186,24 @@ export const userRolesApi = {
 
 // Stores
 export const storesApi = {
-  list: () => api.get("/stores"),
+  list: () => api.get<StoreResponse[]>('/stores'),
+  get: (id: number) => api.get<StoreResponse>(`/stores/${id}`),
+  create: (data: { name: string; location: string; timezone: string }) =>
+    api.post<StoreResponse>('/stores', data),
+  update: (id: number, data: { name?: string; location?: string; timezone?: string }) =>
+    api.put<StoreResponse>(`/stores/${id}`, data),
+};
+
+// Store Departments
+export const storeDepartmentsApi = {
+  listForStore: (storeId: number) =>
+    api.get<StoreDepartmentResponse[]>(`/store-departments/store/${storeId}`),
+  add: (storeId: number, departmentId: number) =>
+    api.post('/store-departments', { store_id: storeId, department_id: departmentId }),
+  remove: (storeId: number, departmentId: number) =>
+    api.delete<{ warnings: Array<{ employee_id: number; name: string }> }>(
+      `/store-departments/store/${storeId}/department/${departmentId}`
+    ),
 };
 
 // Employee Departments

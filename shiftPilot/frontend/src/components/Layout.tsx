@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Users,
   LogOut,
+  Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   );
 
 export function Layout() {
-  const { user, logout, isManagerOrAdmin, highestRole } = useAuth();
+  const { user, logout, isManagerOrAdmin, isAdmin, highestRole } = useAuth();
 
   return (
     <div className="flex h-screen">
@@ -74,6 +75,18 @@ export function Layout() {
               <NavLink to="/employees" className={navLinkClass}>
                 <Users size={18} />
                 Employees
+              </NavLink>
+            </>
+          )}
+
+          {isAdmin && (
+            <>
+              <div className="pt-4 pb-1 px-3 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                Admin
+              </div>
+              <NavLink to="/admin/stores" className={navLinkClass}>
+                <Store size={18} />
+                Store Management
               </NavLink>
             </>
           )}
