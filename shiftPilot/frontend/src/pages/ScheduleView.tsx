@@ -188,14 +188,29 @@ function GeneratePanel({
               {/* Manual input */}
               <div className="flex flex-col">
                 <span className="text-xs text-muted-foreground mb-1">
-                  Custom (Monday)
+                  Custom week
                 </span>
                 <input
                   type="date"
                   className="h-9 rounded-md border bg-background px-3 text-sm"
                   value={selectedWeekStart ?? ""}
-                  onChange={(e) => setSelectedWeekStart(e.target.value || null)}
+                  onChange={(e) => {
+                    if (!e.target.value) { setSelectedWeekStart(null); return; }
+                    const picked = new Date(e.target.value + "T00:00:00");
+                    const day = picked.getDay(); // 0=Sun
+                    const diff = day === 0 ? -6 : 1 - day;
+                    picked.setDate(picked.getDate() + diff);
+                    const yyyy = picked.getFullYear();
+                    const mm = String(picked.getMonth() + 1).padStart(2, "0");
+                    const dd = String(picked.getDate()).padStart(2, "0");
+                    setSelectedWeekStart(`${yyyy}-${mm}-${dd}`);
+                  }}
                 />
+                {selectedWeekStart && !presets.some(p => format(p.date, "yyyy-MM-dd") === selectedWeekStart) && (
+                  <span className="text-xs text-muted-foreground mt-1">
+                    Week of {format(new Date(selectedWeekStart + "T00:00:00"), "d MMM yyyy")}
+                  </span>
+                )}
               </div>
             </div>
           </div>

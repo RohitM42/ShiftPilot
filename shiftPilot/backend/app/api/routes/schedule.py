@@ -49,7 +49,7 @@ def generate_schedule_endpoint(
         )
         for s in existing:
             s.status = ShiftStatus.CANCELLED
-        # cancellations staged but not committed — committed together with new shifts below
+        db.flush()  # make cancellations visible to load_existing_shifts within the same transaction
 
     try:
         result = generate_schedule(db, payload.store_id, payload.week_start)

@@ -17,13 +17,11 @@ import {
   storesApi,
   storeDepartmentsApi,
   departmentsAdminApi,
-  labourBudgetsApi,
 } from "@/services/api";
 import type {
   StoreResponse,
   DepartmentResponse,
   StoreDepartmentResponse,
-  LabourBudgetResponse,
 } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────
@@ -36,18 +34,17 @@ const TIMEZONES = [
   "Europe/Amsterdam",
   "Europe/Madrid",
   "Europe/Rome",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "Asia/Dubai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
 ];
-
-function getCurrentMonday(): string {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 // ── Component ─────────────────────────────────────────────────────────
 
@@ -78,13 +75,6 @@ export default function StoreManagement() {
     code: "",
     has_manager_role: false,
   });
-
-  // Labour budgets
-  const [selectedWeek, setSelectedWeek] = useState(getCurrentMonday());
-  const [labourBudgets, setLabourBudgets] = useState<LabourBudgetResponse[]>(
-    []
-  );
-  const [budgetInputs, setBudgetInputs] = useState<Record<number, number>>({});
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -128,15 +118,6 @@ export default function StoreManagement() {
     }
   }, []);
 
-  const fetchLabourBudgets = useCallback(async (storeId: number) => {
-    try {
-      const res = await labourBudgetsApi.listForStore(storeId);
-      setLabourBudgets(res.data);
-    } catch {
-      setLabourBudgets([]);
-    }
-  }, []);
-
   // On mount
   useEffect(() => {
     const init = async () => {
@@ -159,34 +140,13 @@ export default function StoreManagement() {
         });
       }
       fetchStoreDepts(selectedStoreId);
-      fetchLabourBudgets(selectedStoreId);
     } else if (selectedStoreId === "new") {
       setDetailsForm({ name: "", location: "", timezone: "UTC" });
       setStoreDepts([]);
-      setLabourBudgets([]);
-      setBudgetInputs({});
     }
     setExpandedDeptId(null);
     setShowCreateDept(false);
-  }, [selectedStoreId, stores, fetchStoreDepts, fetchLabourBudgets]);
-
-  // When selectedWeek changes, re-derive budget inputs
-  useEffect(() => {
-    if (typeof selectedStoreId !== "number") return;
-    fetchLabourBudgets(selectedStoreId);
-  }, [selectedWeek, selectedStoreId, fetchLabourBudgets]);
-
-  // Populate budget inputs when labourBudgets or storeDepts change
-  useEffect(() => {
-    const inputs: Record<number, number> = {};
-    const weekBudgets = labourBudgets.filter(
-      (b) => b.week_start_date === selectedWeek
-    );
-    for (const b of weekBudgets) {
-      inputs[b.department_id] = b.budget_hours;
-    }
-    setBudgetInputs(inputs);
-  }, [labourBudgets, selectedWeek]);
+  }, [selectedStoreId, stores, fetchStoreDepts]);
 
   // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -305,55 +265,6 @@ export default function StoreManagement() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleSaveBudgets = async () => {
-    if (typeof selectedStoreId !== "number") return;
-    setSaving(true);
-    try {
-      const weekBudgets = labourBudgets.filter(
-        (b) => b.week_start_date === selectedWeek
-      );
-      const promises: Promise<unknown>[] = [];
-
-      for (const deptId of storeDeptIds) {
-        const value = budgetInputs[deptId];
-        if (!value || value <= 0) continue;
-
-        const existing = weekBudgets.find((b) => b.department_id === deptId);
-        if (existing) {
-          promises.push(
-            labourBudgetsApi.update(existing.id, { budget_hours: value })
-          );
-        } else {
-          promises.push(
-            labourBudgetsApi.create({
-              store_id: selectedStoreId,
-              department_id: deptId,
-              week_start_date: selectedWeek,
-              budget_hours: value,
-            })
-          );
-        }
-      }
-
-      await Promise.all(promises);
-      await fetchLabourBudgets(selectedStoreId);
-    } catch {
-      setError('Failed to save. Please try again.');
-      setTimeout(() => setError(null), 3000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleWeekChange = (delta: number) => {
-    const d = new Date(selectedWeek + 'T00:00:00'); // parse as local time
-    d.setDate(d.getDate() + 7 * delta);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    setSelectedWeek(`${yyyy}-${mm}-${dd}`);
   };
 
   const handleConfirmDeactivate = async () => {
@@ -732,83 +643,6 @@ export default function StoreManagement() {
               </Card>
             )}
 
-            {/* Section 3: Labour Budgets (only for existing stores) */}
-            {typeof selectedStoreId === "number" && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Labour Budgets</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Week picker */}
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleWeekChange(-1)}
-                    >
-                      &larr;
-                    </Button>
-                    <span className="text-sm font-medium">
-                      Week of {selectedWeek}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleWeekChange(1)}
-                    >
-                      &rarr;
-                    </Button>
-                  </div>
-
-                  {/* Budget table */}
-                  {storeDepts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No departments assigned to this store.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {Array.from(storeDeptIds).map((deptId) => {
-                        const dept = allDepts.find((d) => d.id === deptId);
-                        if (!dept) return null;
-                        return (
-                          <div
-                            key={deptId}
-                            className="flex items-center gap-3"
-                          >
-                            <span className="text-sm w-40 truncate">
-                              {dept.name}
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={budgetInputs[deptId] ?? ""}
-                              onChange={(e) =>
-                                setBudgetInputs((prev) => ({
-                                  ...prev,
-                                  [deptId]: Number(e.target.value),
-                                }))
-                              }
-                              className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-                              placeholder="Hours"
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              hours
-                            </span>
-                          </div>
-                        );
-                      })}
-                      <Button
-                        onClick={handleSaveBudgets}
-                        disabled={saving}
-                        className="mt-2"
-                      >
-                        {saving ? "Saving..." : "Save Budgets"}
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
           </>
         )}
       </div>
