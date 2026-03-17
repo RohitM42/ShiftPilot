@@ -45,7 +45,10 @@ def add_department_to_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
 
     # Validate department exists
-    department = db.query(Departments).filter(Departments.id == payload.department_id).first()
+    department = db.query(Departments).filter(
+        Departments.id == payload.department_id,
+        Departments.active == True
+    ).first()
     if not department:
         raise HTTPException(status_code=404, detail="Department not found")
 
