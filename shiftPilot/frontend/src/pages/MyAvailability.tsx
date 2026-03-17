@@ -129,6 +129,7 @@ interface ParsedRule {
 
 interface EnrichedProposal extends AIProposalResponse {
   summary?: string;
+  pending_changes?: Array<{ day_of_week: number; start_time: string | null; end_time: string | null; rule_type: AvailabilityRuleType }>;
 }
 
 interface PendingOverlayRule {
@@ -454,12 +455,12 @@ export default function MyAvailability() {
         .map(async (p): Promise<EnrichedProposal> => {
           const isManual = !p.ai_output_id;
           if (isManual) {
-            const cj = (p as AIProposalResponse & { changes_json?: { summary?: string } }).changes_json;
-            return { ...p, summary: cj?.summary };
+            const cj = (p as AIProposalResponse & { changes_json?: { summary?: string; changes?: EnrichedProposal["pending_changes"] } }).changes_json;
+            return { ...p, summary: cj?.summary, pending_changes: cj?.changes };
           }
           try {
             const outRes = await api.get(`/ai-outputs/${p.ai_output_id}`);
-            return { ...p, summary: outRes.data.summary };
+            return { ...p, summary: outRes.data.summary, pending_changes: outRes.data.result_json?.changes };
           } catch {
             return { ...p };
           }
@@ -538,9 +539,8 @@ export default function MyAvailability() {
 
     for (const p of proposals) {
       if (p.status !== ProposalStatus.PENDING) continue;
-      const cj = (p as AIProposalResponse & { changes_json?: { changes?: Array<{ day_of_week: number; start_time: string | null; end_time: string | null; rule_type: AvailabilityRuleType }> } }).changes_json;
-      if (!cj?.changes) continue;
-      for (const c of cj.changes) {
+      if (!p.pending_changes) continue;
+      for (const c of p.pending_changes) {
         const startH = c.start_time ? timeToHours(c.start_time) : 0;
         const endH = c.end_time ? timeToHours(c.end_time) : 24;
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: false });
