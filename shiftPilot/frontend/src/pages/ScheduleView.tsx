@@ -54,12 +54,13 @@ function GeneratePanel({
   generateResult: GenerateScheduleResponse | null;
   setGenerateResult: (r: GenerateScheduleResponse | null) => void;
   onShiftsChanged: () => void;
-  onViewSummary: (weekStart: string) => void;
+  onViewSummary: (weekStart: string, shiftIds: number[]) => void;
   onCancelDrafts: (shiftIds: number[]) => Promise<void>;
 }) {
   const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null);
   const [mode, setMode] = useState<"add" | "replace">("add");
-  const [existingCount, setExistingCount] = useState<number | null>(null);
+  const [existingPublishedCount, setExistingPublishedCount] = useState<number | null>(null);
+  const [pendingDraftIds, setPendingDraftIds] = useState<number[]>([]);
   const [checkingExisting, setCheckingExisting] = useState(false);
 
   // Compute preset week starts (Mondays)
@@ -93,10 +94,11 @@ function GeneratePanel({
     [nextMonday, weekAfterMonday]
   );
 
-  // When week changes, check for existing shifts
+  // When week changes, check for existing shifts (separated into drafts vs published)
   useEffect(() => {
     if (!selectedWeekStart || !storeId) {
-      setExistingCount(null);
+      setExistingPublishedCount(null);
+      setPendingDraftIds([]);
       return;
     }
     setCheckingExisting(true);
@@ -110,14 +112,21 @@ function GeneratePanel({
         limit: 500,
       })
       .then((r) => {
-        const nonCancelled = (r.data as ShiftResponse[]).filter(
-          (s) => s.status !== ShiftStatus.CANCELLED
-        );
-        setExistingCount(nonCancelled.length);
+        const all = r.data as ShiftResponse[];
+        const drafts = all.filter((s) => s.status === ShiftStatus.DRAFT);
+        const published = all.filter((s) => s.status === ShiftStatus.PUBLISHED);
+        setExistingPublishedCount(published.length);
+        // Only surface pending drafts when we haven't just run a generation this session
+        if (generatedShiftIds.length === 0) {
+          setPendingDraftIds(drafts.map((s) => s.id));
+        }
       })
-      .catch(() => setExistingCount(null))
+      .catch(() => {
+        setExistingPublishedCount(null);
+        setPendingDraftIds([]);
+      })
       .finally(() => setCheckingExisting(false));
-  }, [selectedWeekStart, storeId]);
+  }, [selectedWeekStart, storeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canGenerate = !!selectedWeekStart && !!storeId && !generating;
 
@@ -126,6 +135,7 @@ function GeneratePanel({
     setGenerating(true);
     setGenerateResult(null);
     setGeneratedShiftIds([]);
+    setPendingDraftIds([]); // clear stale DB-detected drafts; new ones tracked via generatedShiftIds
     try {
       const res = await scheduleApi.generate({
         store_id: storeId,
@@ -215,12 +225,44 @@ function GeneratePanel({
             </div>
           </div>
 
-          {/* Existing shifts warning */}
-          {selectedWeekStart && !checkingExisting && existingCount !== null && existingCount > 0 && (
+          {/* Pending drafts notice — shown when DB has unreviewed drafts from a previous session */}
+          {selectedWeekStart && !checkingExisting && pendingDraftIds.length > 0 && generatedShiftIds.length === 0 && (
+            <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-sm space-y-2">
+              <p className="font-medium text-blue-800">
+                {pendingDraftIds.length} unpublished draft shift{pendingDraftIds.length !== 1 ? "s" : ""} from a previous generation
+              </p>
+              <p className="text-xs text-blue-700">
+                These haven't been published yet. Review and publish them, or discard and regenerate.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-xs px-3"
+                  onClick={() => onViewSummary(selectedWeekStart, pendingDraftIds)}
+                >
+                  Review & Publish ({pendingDraftIds.length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/50 hover:bg-destructive/10 h-7 text-xs px-3"
+                  onClick={async () => {
+                    await onCancelDrafts(pendingDraftIds);
+                    setPendingDraftIds([]);
+                    setExistingPublishedCount((c) => c); // keep published count intact
+                  }}
+                >
+                  Discard Drafts
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Published shifts warning — only when published shifts exist */}
+          {selectedWeekStart && !checkingExisting && existingPublishedCount !== null && existingPublishedCount > 0 && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm space-y-2">
               <p className="font-medium text-amber-800">
-                {existingCount} existing shift{existingCount !== 1 ? "s" : ""} found for
-                this week
+                {existingPublishedCount} published shift{existingPublishedCount !== 1 ? "s" : ""} already exist for this week
               </p>
               <div className="flex gap-2">
                 <button
@@ -258,7 +300,7 @@ function GeneratePanel({
             {generatedShiftIds.length > 0 && selectedWeekStart && (
               <>
                 <Button
-                  onClick={() => onViewSummary(selectedWeekStart)}
+                  onClick={() => onViewSummary(selectedWeekStart, generatedShiftIds)}
                   variant="default"
                   size="sm"
                   className="bg-green-600 hover:bg-green-700"
@@ -695,10 +737,10 @@ export default function ScheduleView() {
                 })
                 .then((r) => setShifts(r.data));
             }}
-            onViewSummary={(weekStart) =>
+            onViewSummary={(weekStart, shiftIds) =>
               navigate("/schedule/summary", {
                 state: {
-                  shiftIds: generatedShiftIds,
+                  shiftIds,
                   weekStart,
                   storeId: resolvedStoreId,
                   generateResult,

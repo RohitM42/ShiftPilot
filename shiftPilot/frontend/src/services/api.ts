@@ -136,6 +136,15 @@ export const employeesApi = {
   list: (storeId?: number) =>
     api.get("/employees", { params: storeId ? { store_id: storeId } : {} }),
   get: (id: number) => api.get(`/employees/${id}`),
+  create: (data: {
+    user_id: number;
+    store_id: number;
+    employment_status: string;
+    contracted_weekly_hours: number;
+    dob: string;
+    is_keyholder?: boolean;
+    is_manager?: boolean;
+  }) => api.post("/employees", data),
 };
 
 // Shifts
@@ -179,9 +188,27 @@ export const labourBudgetsApi = {
     api.put<LabourBudgetResponse>(`/labour-budgets/${id}`, data),
 };
 
+// Users (admin)
+export const usersApi = {
+  list: (filter?: number | "unassigned") =>
+    api.get("/users", {
+      params: typeof filter === "number" ? { store_id: filter } : filter === "unassigned" ? { unassigned: true } : {},
+    }),
+  listUnassigned: () => api.get("/users/unassigned"),
+  create: (data: { email: string; firstname: string; surname: string; password: string }) =>
+    api.post("/users", data),
+  update: (id: number, data: { email?: string; firstname?: string; surname?: string; is_active?: boolean }) =>
+    api.put(`/users/${id}`, data),
+  resetPassword: (id: number, new_password: string) =>
+    api.post(`/users/${id}/reset-password`, { new_password }),
+};
+
 // User Roles
 export const userRolesApi = {
   getForUser: (userId: number) => api.get(`/user-roles/user/${userId}`),
+  add: (data: { user_id: number; role: string; store_id?: number | null }) =>
+    api.post("/user-roles", data),
+  remove: (roleId: number) => api.delete(`/user-roles/${roleId}`),
 };
 
 // Stores

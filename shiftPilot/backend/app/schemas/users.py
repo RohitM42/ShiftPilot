@@ -20,6 +20,10 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class UserPasswordReset(BaseModel):
+    new_password: str
+
+
 class UserResponse(UserBase):
     id: int
     is_active: bool

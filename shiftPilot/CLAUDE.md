@@ -10,9 +10,24 @@ ShiftPilot is an AI-assisted shift scheduling application for retail stores. It 
 
 ## Development Commands
 
+### Backend Setup (first time or after cloning)
+```bash
+cd backend
+python -m venv venv
+source venv/Scripts/activate  # Windows
+# source venv/bin/activate    # macOS/Linux
+pip install -r requirements.txt
+```
+
+> The `venv/` folder is excluded from git via `.gitignore`. Never commit it.
+> All dependencies are pinned in `requirements.txt`.
+
 ### Backend
 ```bash
 cd backend
+
+# Activate the venv first (Windows)
+source venv/Scripts/activate
 
 # Run the API server
 uvicorn app.main:app --reload
@@ -108,6 +123,15 @@ Internal types (`types.py`) are plain dataclasses, decoupled from SQLAlchemy mod
 
 ### Frontend Auth
 JWT stored in `localStorage` as `access_token`. `AuthContext` loads user, roles, and employee record on mount. `ProtectedRoute` accepts `requireManagerOrAdmin` prop to gate manager-only pages. The `useAuth()` hook exposes `isAdmin`, `isManager`, `isManagerOrAdmin`, `highestRole`.
+
+### User/Employee Access Control Design
+`GET /users` (list all users) is **admin-only** by design. Managers must not be able to enumerate all system users across stores.
+
+When a manager needs to pick a user to create an employee record for, the frontend uses `GET /users/unassigned` instead. This endpoint (`require_manager_or_admin`) returns only users who:
+- Have **no existing employee record**, and
+- Have **no ADMIN role** assigned
+
+This scopes the list to users who are actually eligible to become employees, avoids cross-store user exposure, and prevents admin accounts from appearing in the dropdown. The endpoint is in `backend/app/api/routes/users.py` (`list_unassigned_users`).
 
 ### Frontend API Layer
 All API calls go through a single axios instance in `frontend/src/services/api.ts`. It auto-injects the JWT header and redirects to `/login` on 401. Named API objects (`authApi`, `meApi`, `aiInputsApi`, `aiProposalsApi`, etc.) group related endpoints.

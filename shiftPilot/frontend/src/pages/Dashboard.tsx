@@ -1,6 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Calendar, Clock, ClipboardCheck, Users, CalendarDays, BookOpen, Store } from "lucide-react";
+import { Calendar, Clock, ClipboardCheck, Users, CalendarDays, BookOpen, Store, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export default function Dashboard() {
@@ -118,6 +118,20 @@ export default function Dashboard() {
         <div className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Admin</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Link to="/admin/users">
+              <Card className="transition-shadow hover:shadow-md cursor-pointer">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    User Management
+                  </CardTitle>
+                  <UserCog size={18} className="text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <p className="text-lg font-semibold">Create and manage users</p>
+                </CardContent>
+              </Card>
+            </Link>
+
             <Link to="/admin/stores">
               <Card className="transition-shadow hover:shadow-md cursor-pointer">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">

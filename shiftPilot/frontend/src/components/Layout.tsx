@@ -11,6 +11,7 @@ import {
   Users,
   LogOut,
   Store,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,6 +85,10 @@ export function Layout() {
               <div className="pt-4 pb-1 px-3 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
                 Admin
               </div>
+              <NavLink to="/admin/users" className={navLinkClass}>
+                <UserCog size={18} />
+                User Management
+              </NavLink>
               <NavLink to="/admin/stores" className={navLinkClass}>
                 <Store size={18} />
                 Store Management
