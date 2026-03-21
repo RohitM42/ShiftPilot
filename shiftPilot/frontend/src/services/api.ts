@@ -215,9 +215,9 @@ export const userRolesApi = {
 export const storesApi = {
   list: () => api.get<StoreResponse[]>('/stores'),
   get: (id: number) => api.get<StoreResponse>(`/stores/${id}`),
-  create: (data: { name: string; location: string; timezone: string }) =>
+  create: (data: { name: string; location: string; timezone: string; opening_time?: string; closing_time?: string }) =>
     api.post<StoreResponse>('/stores', data),
-  update: (id: number, data: { name?: string; location?: string; timezone?: string }) =>
+  update: (id: number, data: { name?: string; location?: string; timezone?: string; opening_time?: string; closing_time?: string }) =>
     api.put<StoreResponse>(`/stores/${id}`, data),
 };
 

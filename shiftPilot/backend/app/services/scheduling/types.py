@@ -115,7 +115,10 @@ class ScheduleContext:
     coverage_requirements: list[CoverageRequirement]
     role_requirements: list[RoleRequirement]
     existing_shifts: list[Shift] = field(default_factory=list)
-    
+    previous_week_shifts: list[Shift] = field(default_factory=list)  # published shifts from prior week for cross-week consecutive days constraint
+    day_start_hour: int = 6   # store opening hour — controls valid shift window
+    day_end_hour: int = 22    # store closing hour
+
     @property
     def week_end(self) -> date:
         """Sunday of the schedule week."""

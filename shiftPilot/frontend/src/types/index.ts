@@ -269,6 +269,8 @@ export interface StoreResponse {
   name: string;
   location: string;
   timezone: string;
+  opening_time: string; // "HH:MM:SS" from Python time
+  closing_time: string;
 }
 
 // Store Departments

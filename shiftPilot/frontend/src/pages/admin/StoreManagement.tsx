@@ -60,6 +60,8 @@ export default function StoreManagement() {
     name: "",
     location: "",
     timezone: "UTC",
+    opening_time: "07:00",
+    closing_time: "22:00",
   });
 
   // Departments
@@ -137,11 +139,14 @@ export default function StoreManagement() {
           name: store.name,
           location: store.location,
           timezone: store.timezone,
+          // Python serialises time as "HH:MM:SS" — strip seconds for the time input
+          opening_time: store.opening_time?.slice(0, 5) ?? "07:00",
+          closing_time: store.closing_time?.slice(0, 5) ?? "22:00",
         });
       }
       fetchStoreDepts(selectedStoreId);
     } else if (selectedStoreId === "new") {
-      setDetailsForm({ name: "", location: "", timezone: "UTC" });
+      setDetailsForm({ name: "", location: "", timezone: "UTC", opening_time: "07:00", closing_time: "22:00" });
       setStoreDepts([]);
     }
     setExpandedDeptId(null);
@@ -404,6 +409,30 @@ export default function StoreManagement() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Opening Time</label>
+                    <input
+                      type="time"
+                      value={detailsForm.opening_time}
+                      onChange={(e) =>
+                        setDetailsForm((f) => ({ ...f, opening_time: e.target.value }))
+                      }
+                      className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Closing Time</label>
+                    <input
+                      type="time"
+                      value={detailsForm.closing_time}
+                      onChange={(e) =>
+                        setDetailsForm((f) => ({ ...f, closing_time: e.target.value }))
+                      }
+                      className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
                 </div>
                 <Button
                   onClick={handleSaveDetails}

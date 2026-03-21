@@ -3,13 +3,21 @@ OR-Tools CP-SAT based schedule solver.
 
 Constraint Priority (via weights):
 - Coverage requirements: highest priority (soft, weight -1000 per unmet slot)
-- Role requirements: highest priority (soft, weight -1000 per unmet slot)  
-- Contracted hours: high priority (soft, weight -100 per hour short)
-- Overtime: low priority (soft, weight -3 per hour over)
+- Role requirements: highest priority (soft, weight -1000 per unmet slot)
+- Contracted hours: high priority (soft, weight -120 per hour short)
+- Overtime (base): low penalty (soft, weight -3 per hour over contracted)
+- Overtime (excess, >2h over contracted): heavy penalty (extra -15 per hour)
+- Shift creation: penalty -8 per shift (discourages unnecessary short-shift splitting)
+- Standard shift lengths: bonus 8h=+30, 7h=+22, 6h=+18, 5h=+10, 9h=+14, 4h=+5
 - Primary department preference: bonus +25
 - Non-primary department: penalty -15
 - Preferred availability: bonus +15
-- Standard shift lengths: bonus +10/+8/+7/+5
+- Fairness (employee gets ≥1 shift): bonus +20 per employee
+
+Hard constraints:
+- One shift per day per employee
+- 12-hour rest between consecutive days (within week)
+- Max 6 working days in any 7-day rolling window (UK Working Time Regulations), cross-week aware
 """
 
 from datetime import datetime, date, time, timedelta
@@ -46,31 +54,32 @@ MIN_SHIFT_HOURS = 4
 MAX_REGULAR_HOURS = 9
 MAX_MANAGER_HOURS = 12
 MIN_REST_HOURS = 12
+MAX_CONSECUTIVE_DAYS = 6  # UK Working Time Regulations: at most 6 working days in any 7-day window
 
 # Soft constraint weights (negative = penalty, positive = bonus)
 WEIGHT_UNMET_COVERAGE_SLOT = -1000
 WEIGHT_UNMET_ROLE_SLOT = -1000
-WEIGHT_UNMET_CONTRACTED_HOUR = -100  # per hour short
-WEIGHT_OVERTIME_HOUR = -3  # per hour over
+WEIGHT_UNMET_CONTRACTED_HOUR = -120       # per hour short (increased from -100 for better fairness)
+WEIGHT_OVERTIME_NORMAL = -3               # per slot of overtime within grace period
+WEIGHT_OVERTIME_EXCESS_EXTRA = -15        # additional penalty per slot beyond grace period
+OVERTIME_GRACE_SLOTS = 2                  # slots (hours at 60-min granularity) before excess penalty kicks in
+WEIGHT_SHIFT_CREATION = -8                # per shift created — discourages unnecessary splitting
 WEIGHT_PRIMARY_DEPT = 25
 WEIGHT_NON_PRIMARY_DEPT = -15
 WEIGHT_PREFERRED_AVAIL = 15
-WEIGHT_SHIFT_8H = 10
-WEIGHT_SHIFT_6H = 8
-WEIGHT_SHIFT_4H = 7
-WEIGHT_SHIFT_OTHER = 5
+WEIGHT_FAIRNESS_MIN_SHIFT = 20            # bonus per contracted employee who gets ≥1 shift (encourages spread)
 
 
-def slot_to_time(slot: int) -> time:
-    """Convert slot index to time. Slot 0 = 6:00am."""
-    total_minutes = DAY_START_HOUR * 60 + slot * SLOT_DURATION_MINUTES
+def slot_to_time(slot: int, day_start_hour: int = DAY_START_HOUR) -> time:
+    """Convert slot index to time."""
+    total_minutes = day_start_hour * 60 + slot * SLOT_DURATION_MINUTES
     return time(total_minutes // 60, total_minutes % 60)
 
 
-def time_to_slot(t: time) -> int:
+def time_to_slot(t: time, day_start_hour: int = DAY_START_HOUR) -> int:
     """Convert time to slot index."""
     total_minutes = t.hour * 60 + t.minute
-    start_minutes = DAY_START_HOUR * 60
+    start_minutes = day_start_hour * 60
     return (total_minutes - start_minutes) // SLOT_DURATION_MINUTES
 
 
@@ -84,36 +93,37 @@ def get_valid_shift_lengths(is_manager: bool) -> list[int]:
 
 
 def _get_shift_length_bonus(length_slots: int) -> int:
-    """Get bonus for shift length preference."""
+    """
+    Shift length preference. Standard retail lengths (8h, 4h, 6h, 10h) are strongly preferred.
+    Odd-hour lengths (5, 7, 9h) get a near-zero bonus so their net value after the per-shift
+    creation penalty (-8) is negative — they only appear if coverage can't be met any other way.
+    Net values: 8h=+42, 4h=+17, 6h=+10, 10h=+4, odd=-7
+    """
     hours = length_slots // SLOTS_PER_HOUR
-    if hours == 8:
-        return WEIGHT_SHIFT_8H
-    elif hours == 6:
-        return WEIGHT_SHIFT_6H
-    elif hours == 4:
-        return WEIGHT_SHIFT_4H
-    else:
-        return WEIGHT_SHIFT_OTHER
+    bonuses = {8: 50, 4: 25, 6: 18, 10: 12}
+    return bonuses.get(hours, 1)  # odd hours (5, 7, 9) → net -7 after creation penalty
 
 
 def _build_availability_matrix(
     employee: Employee,
     context: ScheduleContext,
+    day_start_hour: int,
+    slots_per_day: int,
 ) -> tuple[list[list[bool]], list[list[bool]]]:
     """
     Build availability matrices for an employee.
     Returns:
-        (available_matrix, preferred_matrix) - both 7 x SLOTS_PER_DAY
+        (available_matrix, preferred_matrix) - both 7 x slots_per_day
     """
-    available = [[False] * SLOTS_PER_DAY for _ in range(7)]
-    preferred = [[False] * SLOTS_PER_DAY for _ in range(7)]
-    
+    available = [[False] * slots_per_day for _ in range(7)]
+    preferred = [[False] * slots_per_day for _ in range(7)]
+
     for day in range(7):
         slot_date = context.week_start + timedelta(days=day)
-        
-        for slot in range(SLOTS_PER_DAY):
-            slot_start = slot_to_time(slot)
-            slot_end = slot_to_time(slot + 1)
+
+        for slot in range(slots_per_day):
+            slot_start = slot_to_time(slot, day_start_hour)
+            slot_end = slot_to_time(slot + 1, day_start_hour)
             
             # Check availability rules
             avail = get_availability_for_slot(
@@ -169,15 +179,22 @@ def _get_existing_days(employee_id: int, existing_shifts: list[Shift]) -> set[in
 def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     """Main entry point for OR-Tools schedule generation."""
     model = cp_model.CpModel()
-    
+
+    # Derive time window from store settings rather than hardcoded constants
+    day_start_hour = context.day_start_hour
+    day_end_hour = context.day_end_hour
+    slots_per_day = (day_end_hour - day_start_hour) * SLOTS_PER_HOUR
+
     employees = context.employees
     emp_map = {e.id: e for e in employees}
-    
+
     # Pre-compute availability and preference matrices
     availability = {}
     preferred = {}
     for emp in employees:
-        availability[emp.id], preferred[emp.id] = _build_availability_matrix(emp, context)
+        availability[emp.id], preferred[emp.id] = _build_availability_matrix(
+            emp, context, day_start_hour, slots_per_day
+        )
     
     existing_hours = {e.id: _get_existing_hours(e.id, context.existing_shifts) for e in employees}
     existing_days = {e.id: _get_existing_days(e.id, context.existing_shifts) for e in employees}
@@ -195,10 +212,10 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             if day in existing_days[emp.id]:
                 continue
                 
-            for start_slot in range(SLOTS_PER_DAY):
+            for start_slot in range(slots_per_day):
                 for length in valid_lengths:
                     end_slot = start_slot + length
-                    if end_slot > SLOTS_PER_DAY:
+                    if end_slot > slots_per_day:
                         continue
                     
                     # Check all slots in shift are available
@@ -212,16 +229,16 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     
     # Helper functions
     def get_emp_day_shifts(emp_id: int, day: int):
-        return [(key, var) for key, var in shift_vars.items() 
+        return [(key, var) for key, var in shift_vars.items()
                 if key[0] == emp_id and key[1] == day]
-    
+
     # Helper: check if a shift covers a specific slot
     def shift_covers_slot(key: tuple, slot: int) -> bool:
         _, _, start, length, _ = key
         return start <= slot < start + length
-    
+
     # ========== HARD CONSTRAINTS ==========
-    
+
     # 1. One shift per day per employee (across all departments)
     for emp in employees:
         for day in range(7):
@@ -230,7 +247,25 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             day_shifts = get_emp_day_shifts(emp.id, day)
             if day_shifts:
                 model.AddAtMostOne([var for _, var in day_shifts])
-    
+
+    # Build works_var[emp_id][day] = BoolVar (or int constant) representing whether
+    # employee works that day. Used for consecutive days constraints below.
+    works_var: dict[int, dict[int, object]] = {}
+    for emp in employees:
+        works_var[emp.id] = {}
+        for day in range(7):
+            if day in existing_days[emp.id]:
+                works_var[emp.id][day] = 1  # already has a shift this day
+            else:
+                day_shifts = get_emp_day_shifts(emp.id, day)
+                if day_shifts:
+                    w = model.NewBoolVar(f"works_e{emp.id}_d{day}")
+                    model.Add(sum(var for _, var in day_shifts) >= 1).OnlyEnforceIf(w)
+                    model.Add(sum(var for _, var in day_shifts) == 0).OnlyEnforceIf(w.Not())
+                    works_var[emp.id][day] = w
+                else:
+                    works_var[emp.id][day] = 0  # no valid shifts available this day
+
     # 2. 12-hour rest between consecutive days
     for emp in employees:
         for day in range(6):
@@ -247,11 +282,11 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             for (key1, var1) in today_shifts:
                 _, _, start1, length1, _ = key1
                 end_slot1 = start1 + length1
-                end_minutes = DAY_START_HOUR * 60 + end_slot1 * SLOT_DURATION_MINUTES
-                
+                end_minutes = day_start_hour * 60 + end_slot1 * SLOT_DURATION_MINUTES
+
                 for (key2, var2) in tomorrow_shifts:
                     _, _, start2, _, _ = key2
-                    start_minutes = DAY_START_HOUR * 60 + start2 * SLOT_DURATION_MINUTES
+                    start_minutes = day_start_hour * 60 + start2 * SLOT_DURATION_MINUTES
                     rest_minutes = (24 * 60 - end_minutes) + start_minutes
                     
                     if rest_minutes < MIN_REST_HOURS * 60:
@@ -262,22 +297,57 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                 end_minutes = existing.end_datetime.hour * 60 + existing.end_datetime.minute
                 for (key2, var2) in tomorrow_shifts:
                     _, _, start2, _, _ = key2
-                    start_minutes = DAY_START_HOUR * 60 + start2 * SLOT_DURATION_MINUTES
+                    start_minutes = day_start_hour * 60 + start2 * SLOT_DURATION_MINUTES
                     rest_minutes = (24 * 60 - end_minutes) + start_minutes
                     if rest_minutes < MIN_REST_HOURS * 60:
                         model.Add(var2 == 0)
-            
+
             # New shift today vs existing shift tomorrow
             for existing in existing_tomorrow:
                 start_minutes = existing.start_datetime.hour * 60 + existing.start_datetime.minute
                 for (key1, var1) in today_shifts:
                     _, _, start1, length1, _ = key1
                     end_slot1 = start1 + length1
-                    end_minutes = DAY_START_HOUR * 60 + end_slot1 * SLOT_DURATION_MINUTES
+                    end_minutes = day_start_hour * 60 + end_slot1 * SLOT_DURATION_MINUTES
                     rest_minutes = (24 * 60 - end_minutes) + start_minutes
                     if rest_minutes < MIN_REST_HOURS * 60:
                         model.Add(var1 == 0)
-    
+
+    # 3. Max consecutive working days — UK Working Time Regulations (≤ MAX_CONSECUTIVE_DAYS in any
+    #    7-day rolling window). Applied across the week boundary using previous week's published shifts.
+
+    # Build per-employee set of days worked in the previous week (0=Mon, 6=Sun)
+    prev_worked: dict[int, set[int]] = {emp.id: set() for emp in employees}
+    for s in context.previous_week_shifts:
+        if s.employee_id in prev_worked:
+            prev_worked[s.employee_id].add(s.day_of_week)
+
+    window_len = MAX_CONSECUTIVE_DAYS + 1  # a window of this length may contain at most MAX_CONSECUTIVE_DAYS working days
+
+    for emp in employees:
+        # Within-week rolling windows
+        for window_start in range(7 - MAX_CONSECUTIVE_DAYS):
+            window_vals = [works_var[emp.id][d] for d in range(window_start, window_start + window_len)]
+            const_sum = sum(v for v in window_vals if isinstance(v, int))
+            var_parts = [v for v in window_vals if not isinstance(v, int)]
+            if not var_parts:
+                continue
+            allowed = MAX_CONSECUTIVE_DAYS - const_sum
+            if allowed < len(var_parts):  # only add constraint when it can actually bite
+                model.Add(sum(var_parts) <= max(0, allowed))
+
+        # Cross-week windows: starts at prev_week[k], spans prev[k..6] + curr[0..k-1]
+        emp_prev = prev_worked.get(emp.id, set())
+        for k in range(1, 7):
+            prev_count = sum(1 for d in range(k, 7) if d in emp_prev)
+            curr_vals = [works_var[emp.id][d] for d in range(k)]
+            const_sum = sum(v for v in curr_vals if isinstance(v, int))
+            var_parts = [v for v in curr_vals if not isinstance(v, int)]
+            if not var_parts:
+                continue
+            allowed = max(0, MAX_CONSECUTIVE_DAYS - prev_count - const_sum)
+            model.Add(sum(var_parts) <= allowed)
+
     # ========== SOFT CONSTRAINTS (Objective Terms) ==========
     objective_terms = []
     
@@ -286,15 +356,15 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     for req in context.coverage_requirements:
         dept_id = req.department_id
         day = req.day_of_week
-        req_start_slot = time_to_slot(req.start_time)
-        req_end_slot = time_to_slot(req.end_time)
-        
+        req_start_slot = time_to_slot(req.start_time, day_start_hour)
+        req_end_slot = time_to_slot(req.end_time, day_start_hour)
+
         for slot in range(req_start_slot, req_end_slot):
             covering_vars = []
-            
+
             # Count existing shifts covering this slot
             existing_coverage = 0
-            slot_time = slot_to_time(slot)
+            slot_time = slot_to_time(slot, day_start_hour)
             slot_dt = datetime.combine(
                 context.week_start + timedelta(days=day), slot_time
             )
@@ -329,12 +399,12 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     role_slack_vars = []
     for req in context.role_requirements:
         days = [req.day_of_week] if req.day_of_week is not None else list(range(7))
-        req_start_slot = time_to_slot(req.start_time)
-        req_end_slot = time_to_slot(req.end_time)
-        
+        req_start_slot = time_to_slot(req.start_time, day_start_hour)
+        req_end_slot = time_to_slot(req.end_time, day_start_hour)
+
         for day in days:
             for slot in range(req_start_slot, req_end_slot):
-                slot_time = slot_to_time(slot)
+                slot_time = slot_to_time(slot, day_start_hour)
                 slot_dt = datetime.combine(
                     context.week_start + timedelta(days=day), slot_time
                 )
@@ -410,7 +480,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                 emp_shift_terms.append(length * var)
         
         if emp_shift_terms:
-            total_new = model.NewIntVar(0, SLOTS_PER_DAY * 7, f"new_slots_{emp.id}")
+            total_new = model.NewIntVar(0, slots_per_day * 7, f"new_slots_{emp.id}")
             model.Add(total_new == sum(emp_shift_terms))
             
             # Shortfall = max(0, needed - total_new)
@@ -418,29 +488,37 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             model.AddMaxEquality(shortfall, [0, needed_slots - total_new])
             
             # Penalty per hour short (convert slots to hours)
-            objective_terms.append((WEIGHT_UNMET_CONTRACTED_HOUR // SLOTS_PER_HOUR) * shortfall)
+            objective_terms.append((WEIGHT_UNMET_CONTRACTED_HOUR // SLOTS_PER_HOUR) * shortfall)  # -120 per hour short
             hour_shortfall_vars[emp.id] = shortfall
     
-    # 6. Overtime penalty (soft - small penalty for hours over contracted)
+    # 6. Tiered overtime penalty — light within grace period, heavy beyond
     overtime_vars = {}
     for emp in employees:
         contracted_slots = int(emp.contracted_weekly_hours * SLOTS_PER_HOUR)
         existing_slots = int(existing_hours[emp.id] * SLOTS_PER_HOUR)
-        
+
         emp_shift_terms = []
         for key, var in shift_vars.items():
             if key[0] == emp.id:
                 emp_shift_terms.append(key[3] * var)
-        
+
         if emp_shift_terms:
-            total_new = model.NewIntVar(0, SLOTS_PER_DAY * 7, f"total_new_{emp.id}")
+            total_new = model.NewIntVar(0, slots_per_day * 7, f"total_new_{emp.id}")
             model.Add(total_new == sum(emp_shift_terms))
-            
-            overtime = model.NewIntVar(0, SLOTS_PER_DAY * 7, f"overtime_{emp.id}")
+
+            # Base overtime (applies to all overtime hours)
+            overtime = model.NewIntVar(0, slots_per_day * 7, f"overtime_{emp.id}")
             model.AddMaxEquality(overtime, [0, total_new + existing_slots - contracted_slots])
-            
-            objective_terms.append((WEIGHT_OVERTIME_HOUR // SLOTS_PER_HOUR) * overtime)
+            objective_terms.append(WEIGHT_OVERTIME_NORMAL * overtime)
             overtime_vars[emp.id] = overtime
+
+            # Excess overtime beyond grace period (extra heavy penalty)
+            overtime_excess = model.NewIntVar(0, slots_per_day * 7, f"overtime_excess_{emp.id}")
+            model.AddMaxEquality(
+                overtime_excess,
+                [0, total_new + existing_slots - contracted_slots - OVERTIME_GRACE_SLOTS]
+            )
+            objective_terms.append(WEIGHT_OVERTIME_EXCESS_EXTRA * overtime_excess)
     
     # 7. Department preference bonuses
     for key, var in shift_vars.items():
@@ -462,12 +540,25 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
         if all_preferred:
             objective_terms.append(WEIGHT_PREFERRED_AVAIL * var)
     
-    # 9. Shift length preference bonus
+    # 9. Shift length preference bonus + per-shift creation penalty
     for key, var in shift_vars.items():
         length = key[3]
         bonus = _get_shift_length_bonus(length)
-        objective_terms.append(bonus * var)
-    
+        objective_terms.append((bonus + WEIGHT_SHIFT_CREATION) * var)
+        # Net effect: 8h shift = +30-8 = +22; two 4h shifts = 2*(+5-8) = -6 → solver prefers one 8h
+
+    # 10. Fairness: bonus for each contracted employee who gets at least one shift
+    #     Encourages the solver to spread work across all available employees
+    for emp in employees:
+        if emp.contracted_weekly_hours <= 0:
+            continue
+        emp_vars = [var for key, var in shift_vars.items() if key[0] == emp.id]
+        if emp_vars:
+            has_shift = model.NewBoolVar(f"has_shift_e{emp.id}")
+            model.Add(sum(emp_vars) >= 1).OnlyEnforceIf(has_shift)
+            model.Add(sum(emp_vars) == 0).OnlyEnforceIf(has_shift.Not())
+            objective_terms.append(WEIGHT_FAIRNESS_MIN_SHIFT * has_shift)
+
     # Set objective: maximize (since penalties are negative, this minimizes violations)
     if objective_terms:
         model.Maximize(sum(objective_terms))
@@ -486,8 +577,8 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                 emp_id, day, start_slot, length, dept_id = key
                 
                 slot_date = context.week_start + timedelta(days=day)
-                start_time = slot_to_time(start_slot)
-                end_time = slot_to_time(start_slot + length)
+                start_time = slot_to_time(start_slot, day_start_hour)
+                end_time = slot_to_time(start_slot + length, day_start_hour)
                 
                 shifts.append(Shift(
                     employee_id=emp_id,
@@ -497,8 +588,8 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                     end_datetime=datetime.combine(slot_date, end_time),
                 ))
         
-        unmet_coverage = _check_unmet_coverage(shifts, context)
-        unmet_roles = _check_unmet_roles(shifts, context)
+        unmet_coverage = _check_unmet_coverage(shifts, context, day_start_hour)
+        unmet_roles = _check_unmet_roles(shifts, context, day_start_hour)
         unmet_hours = _check_unmet_hours(shifts, context, existing_hours)
         
         warnings = []
@@ -525,18 +616,19 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
 def _check_unmet_coverage(
     shifts: list[Shift],
     context: ScheduleContext,
+    day_start_hour: int,
 ) -> list[CoverageRequirement]:
     """Check which coverage requirements aren't fully met."""
     unmet = []
     all_shifts = shifts + context.existing_shifts
-    
+
     for req in context.coverage_requirements:
         slot_date = context.week_start + timedelta(days=req.day_of_week)
-        req_start = time_to_slot(req.start_time)
-        req_end = time_to_slot(req.end_time)
-        
+        req_start = time_to_slot(req.start_time, day_start_hour)
+        req_end = time_to_slot(req.end_time, day_start_hour)
+
         for slot in range(req_start, req_end):
-            slot_time = slot_to_time(slot)
+            slot_time = slot_to_time(slot, day_start_hour)
             slot_dt = datetime.combine(slot_date, slot_time)
             
             count = sum(
@@ -555,25 +647,26 @@ def _check_unmet_coverage(
 def _check_unmet_roles(
     shifts: list[Shift],
     context: ScheduleContext,
+    day_start_hour: int,
 ) -> list[RoleRequirement]:
     """Check which role requirements aren't met."""
     unmet = []
     all_shifts = shifts + context.existing_shifts
     emp_map = {e.id: e for e in context.employees}
-    
+
     for req in context.role_requirements:
         days = [req.day_of_week] if req.day_of_week is not None else list(range(7))
-        req_start = time_to_slot(req.start_time)
-        req_end = time_to_slot(req.end_time)
-        
+        req_start = time_to_slot(req.start_time, day_start_hour)
+        req_end = time_to_slot(req.end_time, day_start_hour)
+
         is_met = True
         for day in days:
             if not is_met:
                 break
             slot_date = context.week_start + timedelta(days=day)
-            
+
             for slot in range(req_start, req_end):
-                slot_time = slot_to_time(slot)
+                slot_time = slot_to_time(slot, day_start_hour)
                 slot_dt = datetime.combine(slot_date, slot_time)
                 
                 active_emps = [
