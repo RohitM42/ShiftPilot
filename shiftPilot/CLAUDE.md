@@ -46,7 +46,7 @@ alembic upgrade head
 alembic revision --autogenerate -m "description"
 
 # Seed data
-python scripts/seed_data_v4.py
+python scripts/seed_data_v5.py
 ```
 
 ### Frontend

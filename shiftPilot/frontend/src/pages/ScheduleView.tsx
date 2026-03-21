@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays, isToday, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -304,8 +304,14 @@ function GeneratePanel({
           {/* Actions */}
           <div className="flex items-center gap-3">
             <Button onClick={handleGenerate} disabled={!canGenerate} size="sm">
-              {generating ? "Generating… (may take up to 2 min)" : "Run Generator"}
+              {generating ? "Generating…" : "Run Generator"}
             </Button>
+            {generating && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                This may take up to 2 minutes…
+              </span>
+            )}
 
             {generatedShiftIds.length > 0 && selectedWeekStart && (
               <>

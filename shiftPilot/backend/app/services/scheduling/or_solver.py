@@ -4,6 +4,7 @@ OR-Tools CP-SAT based schedule solver.
 Constraint Priority (via weights):
 - Coverage requirements: highest priority (soft, weight -1000 per unmet slot)
 - Role requirements: highest priority (soft, weight -1000 per unmet slot)
+- Store operational hours floor: medium priority (soft, weight -500 per uncovered slot — any employee, any dept)
 - Contracted hours: high priority (soft, weight -120 per hour short)
 - Overtime (base): low penalty (soft, weight -3 per hour over contracted)
 - Overtime (excess, >2h over contracted): heavy penalty (extra -15 per hour)
@@ -59,6 +60,7 @@ MAX_CONSECUTIVE_DAYS = 6  # UK Working Time Regulations: at most 6 working days 
 # Soft constraint weights (negative = penalty, positive = bonus)
 WEIGHT_UNMET_COVERAGE_SLOT = -1000
 WEIGHT_UNMET_ROLE_SLOT = -1000
+WEIGHT_STORE_UNCOVERED_SLOT = -500   # store-wide floor: ≥1 person during operating hours
 WEIGHT_UNMET_CONTRACTED_HOUR = -120       # per hour short (increased from -100 for better fairness)
 WEIGHT_OVERTIME_NORMAL = -3               # per slot of overtime within grace period
 WEIGHT_OVERTIME_EXCESS_EXTRA = -15        # additional penalty per slot beyond grace period
@@ -463,7 +465,37 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                         else:
                             objective_terms.append(WEIGHT_UNMET_ROLE_SLOT * needed_managers)
     
-    # 5. Contracted hours (soft - penalty for shortfall)
+    # 5. Store operational hours presence (soft — any dept, any employee, ≥1 per slot)
+    #    Ensures the store always has at least one person during its opening window.
+    #    Weight is half of coverage/role so specific department requirements still dominate.
+
+    # Pre-index shift_vars by day to avoid O(n²) inner loop
+    _shifts_by_day: dict[int, list[tuple]] = {d: [] for d in range(7)}
+    for key, var in shift_vars.items():
+        _shifts_by_day[key[1]].append((key, var))
+
+    for day in range(7):
+        for slot in range(slots_per_day):
+            slot_time = slot_to_time(slot, day_start_hour)
+            slot_dt = datetime.combine(context.week_start + timedelta(days=day), slot_time)
+
+            # Skip if an existing shift already covers this slot
+            if any(s.start_datetime <= slot_dt < s.end_datetime for s in context.existing_shifts):
+                continue
+
+            covering_vars = [
+                var for key, var in _shifts_by_day[day]
+                if shift_covers_slot(key, slot)
+            ]
+
+            if covering_vars:
+                slack = model.NewBoolVar(f"store_present_d{day}_s{slot}")
+                model.Add(sum(covering_vars) + slack >= 1)
+                objective_terms.append(WEIGHT_STORE_UNCOVERED_SLOT * slack)
+            # If no shift vars exist for this slot at all, no penalty — it's a scheduling
+            # impossibility already surfaced by coverage/role constraints.
+
+    # 7. Contracted hours (soft - penalty for shortfall)
     hour_shortfall_vars = {}
     for emp in employees:
         required_slots = int(emp.contracted_weekly_hours * SLOTS_PER_HOUR)
@@ -491,7 +523,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             objective_terms.append((WEIGHT_UNMET_CONTRACTED_HOUR // SLOTS_PER_HOUR) * shortfall)  # -120 per hour short
             hour_shortfall_vars[emp.id] = shortfall
     
-    # 6. Tiered overtime penalty — light within grace period, heavy beyond
+    # 8. Tiered overtime penalty — light within grace period, heavy beyond
     overtime_vars = {}
     for emp in employees:
         contracted_slots = int(emp.contracted_weekly_hours * SLOTS_PER_HOUR)
@@ -520,7 +552,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
             )
             objective_terms.append(WEIGHT_OVERTIME_EXCESS_EXTRA * overtime_excess)
     
-    # 7. Department preference bonuses
+    # 9. Department preference bonuses
     for key, var in shift_vars.items():
         emp_id, day, start, length, dept_id = key
         emp = emp_map[emp_id]
@@ -530,7 +562,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
         else:
             objective_terms.append(WEIGHT_NON_PRIMARY_DEPT * var)
     
-    # 8. Preferred availability bonus
+    # 10. Preferred availability bonus
     for key, var in shift_vars.items():
         emp_id, day, start, length, _ = key
         pref = preferred[emp_id]
@@ -540,14 +572,14 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
         if all_preferred:
             objective_terms.append(WEIGHT_PREFERRED_AVAIL * var)
     
-    # 9. Shift length preference bonus + per-shift creation penalty
+    # 11. Shift length preference bonus + per-shift creation penalty
     for key, var in shift_vars.items():
         length = key[3]
         bonus = _get_shift_length_bonus(length)
         objective_terms.append((bonus + WEIGHT_SHIFT_CREATION) * var)
         # Net effect: 8h shift = +30-8 = +22; two 4h shifts = 2*(+5-8) = -6 → solver prefers one 8h
 
-    # 10. Fairness: bonus for each contracted employee who gets at least one shift
+    # 12. Fairness: bonus for each contracted employee who gets at least one shift
     #     Encourages the solver to spread work across all available employees
     for emp in employees:
         if emp.contracted_weekly_hours <= 0:
