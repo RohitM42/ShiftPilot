@@ -1,8 +1,18 @@
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays, isToday, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   shiftsApi,
   employeesApi,
@@ -22,7 +32,7 @@ import type {
 } from "@/types";
 import { ShiftStatus } from "@/types";
 import { cn } from "@/lib/utils";
-import { EmployeeGantt, type ParsedShift } from "@/components/EmployeeGantt";
+import { EmployeeGantt, type ParsedShift, type PreviewShift } from "@/components/EmployeeGantt";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -332,6 +342,288 @@ function GeneratePanel({
   );
 }
 
+// ── Shared time input ─────────────────────────────────────────────────
+
+function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parts = value ? value.split(":").map(Number) : [0, 0];
+  const h = isNaN(parts[0]) ? 0 : parts[0];
+  const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
+
+  const setH = (raw: string) => {
+    const n = parseInt(raw);
+    const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+  };
+  const setM = (raw: string) => {
+    onChange(`${h.toString().padStart(2, "0")}:${raw.padStart(2, "0")}`);
+  };
+
+  const base = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="number" min={0} max={23} value={h}
+        onChange={(e) => setH(e.target.value)}
+        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        placeholder="HH"
+      />
+      <span className="text-muted-foreground text-sm font-medium">:</span>
+      <select value={m} onChange={(e) => setM(e.target.value)} className={`${base} w-16`}>
+        {[0, 15, 30, 45].map((min) => (
+          <option key={min} value={min}>{min.toString().padStart(2, "0")}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// ── Manual shift panel ────────────────────────────────────────────────
+
+interface ManualRow {
+  id: number;
+  employeeId: string;
+  day: string; // "yyyy-MM-dd"
+  startTime: string; // "HH:MM"
+  endTime: string;   // "HH:MM"
+  departmentId: string;
+}
+
+function makeRow(id: number, defaultDay: string): ManualRow {
+  return { id, employeeId: "", day: defaultDay, startTime: "09:00", endTime: "17:00", departmentId: "" };
+}
+
+function ManualShiftPanel({
+  storeId,
+  employees,
+  empDepts,
+  empPrimaryDepts,
+  departments,
+  selectedDate,
+  expanded,
+  onToggle,
+  onShiftsChanged,
+  onPreviewChange,
+}: {
+  storeId: number | null;
+  employees: EmployeeWithUserResponse[];
+  empDepts: Map<number, number[]>;
+  empPrimaryDepts: Map<number, number>;
+  departments: Department[];
+  selectedDate: Date;
+  expanded: boolean;
+  onToggle: () => void;
+  onShiftsChanged: () => void;
+  onPreviewChange: (previews: PreviewShift[]) => void;
+}) {
+  const [rows, setRows] = useState<ManualRow[]>([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
+  const [submitting, setSubmitting] = useState(false);
+  const [nextId, setNextId] = useState(2);
+
+  // Reset rows with current date whenever panel opens or closes
+  useEffect(() => {
+    setRows([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
+    setNextId(2);
+    if (!expanded) onPreviewChange([]);
+  }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const deptMap = useMemo(() => new Map(departments.map((d) => [d.id, d.name])), [departments]);
+
+  const updateRow = (id: number, patch: Partial<ManualRow>) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const addRow = () => {
+    const day = format(selectedDate, "yyyy-MM-dd");
+    setRows((prev) => [...prev, makeRow(nextId, day)]);
+    setNextId((n) => n + 1);
+  };
+
+  const removeRow = (id: number) => setRows((prev) => prev.filter((r) => r.id !== id));
+
+  // Build preview shifts from complete rows and push up to parent
+  useEffect(() => {
+    const previews: PreviewShift[] = [];
+    for (const row of rows) {
+      if (!row.employeeId || !row.day || !row.startTime || !row.endTime || !row.departmentId) continue;
+      const start = new Date(`${row.day}T${row.startTime}:00`);
+      const end = new Date(`${row.day}T${row.endTime}:00`);
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) continue;
+      previews.push({
+        employeeId: Number(row.employeeId),
+        start,
+        end,
+        departmentName: deptMap.get(Number(row.departmentId)) ?? "",
+      });
+    }
+    onPreviewChange(previews);
+  }, [rows, deptMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function submit(shiftStatus: "DRAFT" | "PUBLISHED") {
+    if (!storeId) return;
+    const complete = rows.filter(
+      (r) => r.employeeId && r.day && r.startTime && r.endTime && r.departmentId
+    );
+    if (complete.length === 0) return;
+
+    setSubmitting(true);
+    try {
+      await Promise.all(
+        complete.map((r) =>
+          shiftsApi.create({
+            store_id: storeId,
+            employee_id: Number(r.employeeId),
+            department_id: Number(r.departmentId),
+            start_datetime_utc: new Date(`${r.day}T${r.startTime}:00`).toISOString(),
+            end_datetime_utc: new Date(`${r.day}T${r.endTime}:00`).toISOString(),
+            status: shiftStatus,
+            source: "MANUAL",
+          })
+        )
+      );
+      onShiftsChanged();
+      onToggle(); // collapse panel (effect above will clear rows + preview)
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+
+  // Week days for the day selector
+  const weekDays = useMemo(() => {
+    const monday = new Date(selectedDate);
+    const day = monday.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    monday.setDate(monday.getDate() + diff);
+    monday.setHours(0, 0, 0, 0);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = addDays(monday, i);
+      return { value: format(d, "yyyy-MM-dd"), label: format(d, "EEE d MMM") };
+    });
+  }, [selectedDate]);
+
+  const completeCount = rows.filter(
+    (r) => r.employeeId && r.day && r.startTime && r.endTime && r.departmentId
+  ).length;
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex items-center justify-between px-4 py-3">
+        <div>
+          <h2 className="text-sm font-semibold">Add Shifts Manually</h2>
+          <p className="text-xs text-muted-foreground">
+            Build individual shifts — preview updates live on the gantt above
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={onToggle}>
+          {expanded ? <X size={14} /> : "Add Shifts"}
+        </Button>
+      </div>
+
+      {expanded && (
+        <div className="border-t px-4 py-4 space-y-4">
+          <div className="space-y-2">
+            {rows.map((row) => {
+              const empDeptIds = row.employeeId ? (empDepts.get(Number(row.employeeId)) ?? []) : [];
+              const availableDepts = departments.filter((d) => empDeptIds.includes(d.id));
+
+              return (
+                <div key={row.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background/50 px-3 py-2">
+                  {/* Employee */}
+                  <select
+                    className={selectClass}
+                    value={row.employeeId}
+                    onChange={(e) => {
+                      const empId = e.target.value;
+                      const primaryDeptId = empId ? empPrimaryDepts.get(Number(empId)) : undefined;
+                      updateRow(row.id, {
+                        employeeId: empId,
+                        departmentId: primaryDeptId ? String(primaryDeptId) : "",
+                      });
+                    }}
+                  >
+                    <option value="">Employee…</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.firstname} {e.surname}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Day */}
+                  <select
+                    className={selectClass}
+                    value={row.day}
+                    onChange={(e) => updateRow(row.id, { day: e.target.value })}
+                  >
+                    {weekDays.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+
+                  {/* Times */}
+                  <SplitTimeInput value={row.startTime} onChange={(v) => updateRow(row.id, { startTime: v })} />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <SplitTimeInput value={row.endTime} onChange={(v) => updateRow(row.id, { endTime: v })} />
+
+                  {/* Department — filtered to employee's depts */}
+                  <select
+                    className={selectClass}
+                    value={row.departmentId}
+                    onChange={(e) => updateRow(row.id, { departmentId: e.target.value })}
+                    disabled={!row.employeeId}
+                  >
+                    <option value="">Department…</option>
+                    {availableDepts.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto text-muted-foreground hover:text-destructive h-7 w-7"
+                    onClick={() => removeRow(row.id)}
+                    disabled={rows.length === 1}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
+              <Plus size={13} />
+              Add row
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={onToggle} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={submitting || completeCount === 0}
+                onClick={() => submit("DRAFT")}
+              >
+                Save as Draft ({completeCount})
+              </Button>
+              <Button
+                size="sm"
+                disabled={submitting || completeCount === 0}
+                onClick={() => submit("PUBLISHED")}
+              >
+                Publish ({completeCount})
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UnmetRulesPanel({
   result,
   employees,
@@ -459,6 +751,7 @@ export default function ScheduleView() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [empDepts, setEmpDepts] = useState<Map<number, number[]>>(new Map());
+  const [empPrimaryDepts, setEmpPrimaryDepts] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
 
   // Generate state
@@ -466,6 +759,36 @@ export default function ScheduleView() {
   const [generating, setGenerating] = useState(false);
   const [generatedShiftIds, setGeneratedShiftIds] = useState<number[]>([]);
   const [generateResult, setGenerateResult] = useState<GenerateScheduleResponse | null>(null);
+
+  // Manual shift state
+  const [manualExpanded, setManualExpanded] = useState(false);
+  const [previewShifts, setPreviewShifts] = useState<PreviewShift[]>([]);
+
+  // Delete confirmation
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function confirmDelete() {
+    if (!pendingDeleteId || !resolvedStoreId) return;
+    setDeleting(true);
+    try {
+      await shiftsApi.delete(pendingDeleteId);
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      const r = await shiftsApi.list({
+        store_id: resolvedStoreId,
+        start_date: dayStart.toISOString(),
+        end_date: dayEnd.toISOString(),
+        limit: 500,
+      });
+      setShifts(r.data);
+    } finally {
+      setDeleting(false);
+      setPendingDeleteId(null);
+    }
+  }
 
   // Load static data once
   useEffect(() => {
@@ -493,11 +816,14 @@ export default function ScheduleView() {
     if (!resolvedStoreId) return;
     employeeDepartmentsApi.listByStore(resolvedStoreId).then((r) => {
       const map = new Map<number, number[]>();
+      const primaryMap = new Map<number, number>();
       for (const ed of r.data as EmployeeDepartmentResponse[]) {
         if (!map.has(ed.employee_id)) map.set(ed.employee_id, []);
         map.get(ed.employee_id)!.push(ed.department_id);
+        if (ed.is_primary) primaryMap.set(ed.employee_id, ed.department_id);
       }
       setEmpDepts(map);
+      setEmpPrimaryDepts(primaryMap);
     });
   }, [resolvedStoreId]);
 
@@ -691,6 +1017,28 @@ export default function ScheduleView() {
         </Button>
       </div>
 
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={pendingDeleteId !== null} onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete shift?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the shift. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Admin: prompt to select store */}
       {isAdmin && !selectedStoreId && (
         <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground text-sm">
@@ -709,6 +1057,10 @@ export default function ScheduleView() {
             <EmployeeGantt
               employees={filteredEmployees}
               shiftsByEmployee={shiftsByEmployee}
+              previewShifts={previewShifts.filter(
+                (p) => format(p.start, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd")
+              )}
+              onDeleteShift={setPendingDeleteId}
             />
           )}
 
@@ -752,6 +1104,33 @@ export default function ScheduleView() {
               setGeneratedShiftIds([]);
               setGenerateResult(null);
             }}
+          />
+
+          {/* Manual shift entry */}
+          <ManualShiftPanel
+            storeId={resolvedStoreId}
+            employees={employees}
+            empDepts={empDepts}
+            empPrimaryDepts={empPrimaryDepts}
+            departments={departments}
+            selectedDate={selectedDate}
+            expanded={manualExpanded}
+            onToggle={() => setManualExpanded((v) => !v)}
+            onShiftsChanged={() => {
+              const dayStart = new Date(selectedDate);
+              dayStart.setHours(0, 0, 0, 0);
+              const dayEnd = new Date(selectedDate);
+              dayEnd.setHours(23, 59, 59, 999);
+              shiftsApi
+                .list({
+                  store_id: resolvedStoreId!,
+                  start_date: dayStart.toISOString(),
+                  end_date: dayEnd.toISOString(),
+                  limit: 500,
+                })
+                .then((r) => setShifts(r.data));
+            }}
+            onPreviewChange={setPreviewShifts}
           />
 
           {/* Unmet rules */}

@@ -151,6 +151,16 @@ export const employeesApi = {
 export const shiftsApi = {
   list: (params?: Record<string, unknown>) =>
     api.get("/shifts", { params }),
+  create: (payload: {
+    store_id: number;
+    department_id: number;
+    employee_id: number;
+    start_datetime_utc: string;
+    end_datetime_utc: string;
+    status: string;
+    source: string;
+  }) => api.post("/shifts", payload),
+  delete: (shiftId: number) => api.delete(`/shifts/${shiftId}`),
 };
 
 // Departments

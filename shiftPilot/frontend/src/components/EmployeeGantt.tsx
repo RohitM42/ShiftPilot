@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { EmployeeWithUserResponse } from "@/types";
 import { ShiftStatus } from "@/types";
@@ -33,15 +35,27 @@ export interface ParsedShift {
   status: ShiftStatus;
 }
 
+export interface PreviewShift {
+  employeeId: number;
+  start: Date;
+  end: Date;
+  departmentName: string;
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export function EmployeeGantt({
   employees,
   shiftsByEmployee,
+  previewShifts = [],
+  onDeleteShift,
 }: {
   employees: EmployeeWithUserResponse[];
   shiftsByEmployee: Map<number, ParsedShift[]>;
+  previewShifts?: PreviewShift[];
+  onDeleteShift?: (shiftId: number) => void;
 }) {
+  const [hoveredShiftId, setHoveredShiftId] = useState<number | null>(null);
   const sortedEmployees = [...employees].sort((a, b) => {
     const aHas = (shiftsByEmployee.get(a.id) ?? []).length > 0 ? 0 : 1;
     const bHas = (shiftsByEmployee.get(b.id) ?? []).length > 0 ? 0 : 1;
@@ -146,21 +160,24 @@ export function EmployeeGantt({
                   const width = ((endH - startH) / GRID_HOURS) * 100;
                   const isDraft = shift.status === ShiftStatus.DRAFT;
 
+                  const isHovered = hoveredShiftId === shift.id;
                   return (
                     <div
                       key={shift.id}
                       className={cn(
-                        "absolute top-1 bottom-1 rounded-md flex items-center justify-between px-2 overflow-hidden",
+                        "absolute top-1 bottom-1 rounded-md flex items-center overflow-hidden",
                         isDraft
                           ? "bg-primary/20 border border-dashed border-primary/60"
                           : "bg-primary border border-primary"
                       )}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       title={`${emp.firstname} ${emp.surname} · ${shift.departmentName} · ${shift.status}`}
+                      onMouseEnter={() => setHoveredShiftId(shift.id)}
+                      onMouseLeave={() => setHoveredShiftId(null)}
                     >
                       <span
                         className={cn(
-                          "text-xs font-semibold truncate",
+                          "text-xs font-semibold truncate flex-1 min-w-0 pl-2",
                           isDraft ? "text-primary" : "text-primary-foreground"
                         )}
                       >
@@ -168,22 +185,54 @@ export function EmployeeGantt({
                         <span
                           className={cn(
                             "ml-1.5 font-normal",
-                            isDraft
-                              ? "text-primary/70"
-                              : "text-primary-foreground/80"
+                            isDraft ? "text-primary/70" : "text-primary-foreground/80"
                           )}
                         >
                           {shift.departmentName}
                         </span>
                       </span>
-                      <span
-                        className={cn(
-                          "text-xs font-medium ml-2 shrink-0",
-                          isDraft ? "text-primary/70" : "text-primary-foreground/70"
-                        )}
-                      >
-                        {shift.hours}h
+
+                      {isHovered && onDeleteShift ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDeleteShift(shift.id); }}
+                          className="self-stretch flex items-center px-2 hover:bg-destructive text-destructive hover:text-white transition-colors shrink-0"
+                          title="Delete shift"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      ) : (
+                        <span
+                          className={cn(
+                            "text-xs font-medium px-2 shrink-0",
+                            isDraft ? "text-primary/70" : "text-primary-foreground/70"
+                          )}
+                        >
+                          {shift.hours}h
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Preview shifts (local form state, not yet saved) */}
+                {previewShifts.filter((p) => p.employeeId === emp.id).map((p, i) => {
+                  const startH = p.start.getHours() + p.start.getMinutes() / 60;
+                  const endH = p.end.getHours() + p.end.getMinutes() / 60;
+                  const left = ((startH - GRID_START) / GRID_HOURS) * 100;
+                  const width = ((endH - startH) / GRID_HOURS) * 100;
+                  const hours = Math.round(((p.end.getTime() - p.start.getTime()) / 3600000) * 10) / 10;
+                  return (
+                    <div
+                      key={`preview-${i}`}
+                      className="absolute top-1 bottom-1 rounded-md flex items-center justify-between px-2 overflow-hidden bg-amber-100 border border-dashed border-amber-500 opacity-80"
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                      title={`Preview · ${emp.firstname} ${emp.surname} · ${p.departmentName}`}
+                    >
+                      <span className="text-xs font-semibold truncate text-amber-800">
+                        {formatShiftTime(p.start)} – {formatShiftTime(p.end)}
+                        <span className="ml-1.5 font-normal text-amber-700">{p.departmentName}</span>
                       </span>
+                      <span className="text-xs font-medium ml-2 shrink-0 text-amber-700">{hours}h</span>
                     </div>
                   );
                 })}
