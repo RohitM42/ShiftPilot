@@ -11,29 +11,13 @@ export const GRID_HOURS = GRID_END - GRID_START;
 
 // ── Time helpers ─────────────────────────────────────────────────────
 
-export const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(
-    new Date(2000, 0, 1, 13)
-  );
-  return formatted.includes("13");
-})();
-
 export function formatHourLabel(hour: number): string {
-  if (hour === 24) return is24Hour ? "00:00" : "12am";
-  if (is24Hour) return `${hour.toString().padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
+  if (hour === 24) return "00:00";
+  return `${hour.toString().padStart(2, "0")}:00`;
 }
 
 export function formatShiftTime(dt: Date): string {
-  if (is24Hour) {
-    return `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
-  }
-  const h = dt.getHours() % 12 || 12;
-  const m = dt.getMinutes().toString().padStart(2, "0");
-  const period = dt.getHours() >= 12 ? "pm" : "am";
-  return `${h}:${m}${period}`;
+  return `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
 }
 
 // ── Types ────────────────────────────────────────────────────────────

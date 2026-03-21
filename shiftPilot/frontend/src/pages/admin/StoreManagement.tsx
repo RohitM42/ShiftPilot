@@ -24,6 +24,44 @@ import type {
   StoreDepartmentResponse,
 } from "@/types";
 
+// ── Time input ────────────────────────────────────────────────────────
+
+function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parts = value ? value.split(":").map(Number) : [0, 0];
+  const h = isNaN(parts[0]) ? 0 : parts[0];
+  const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
+
+  const setH = (raw: string) => {
+    const n = parseInt(raw);
+    const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+  };
+  const setM = (raw: string) => {
+    onChange(`${h.toString().padStart(2, "0")}:${raw.padStart(2, "0")}`);
+  };
+
+  const base = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <input
+        type="number"
+        min={0}
+        max={23}
+        value={h}
+        onChange={(e) => setH(e.target.value)}
+        className={`${base} w-16 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        placeholder="HH"
+      />
+      <span className="text-muted-foreground text-sm font-medium">:</span>
+      <select value={m} onChange={(e) => setM(e.target.value)} className={`${base} w-16`}>
+        {[0, 15, 30, 45].map((min) => (
+          <option key={min} value={min}>{min.toString().padStart(2, "0")}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ── Constants ─────────────────────────────────────────────────────────
 
 const TIMEZONES = [
@@ -413,24 +451,16 @@ export default function StoreManagement() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium">Opening Time</label>
-                    <input
-                      type="time"
+                    <SplitTimeInput
                       value={detailsForm.opening_time}
-                      onChange={(e) =>
-                        setDetailsForm((f) => ({ ...f, opening_time: e.target.value }))
-                      }
-                      className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                      onChange={(v) => setDetailsForm((f) => ({ ...f, opening_time: v }))}
                     />
                   </div>
                   <div>
                     <label className="text-sm font-medium">Closing Time</label>
-                    <input
-                      type="time"
+                    <SplitTimeInput
                       value={detailsForm.closing_time}
-                      onChange={(e) =>
-                        setDetailsForm((f) => ({ ...f, closing_time: e.target.value }))
-                      }
-                      className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                      onChange={(v) => setDetailsForm((f) => ({ ...f, closing_time: v }))}
                     />
                   </div>
                 </div>

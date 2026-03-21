@@ -28,32 +28,62 @@ const PROPOSAL_STATUS_VARIANT: Record<ProposalStatus, "default" | "success" | "d
 
 // ── Time helpers ──────────────────────────────────────────────────────
 
-const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(new Date(2000, 0, 1, 13));
-  return formatted.includes("13");
-})();
-
 function formatHourLabel(hour: number): string {
-  if (hour === 24) return is24Hour ? "00:00" : "12am";
-  if (is24Hour) return `${hour.toString().padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
+  if (hour === 24) return "00:00";
+  return `${hour.toString().padStart(2, "0")}:00`;
 }
 
 function formatRuleTime(timeStr: string | null): string {
   if (!timeStr) return "";
   const [h, m] = timeStr.split(":").map(Number);
-  if (is24Hour) return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
-  const period = h >= 12 ? "pm" : "am";
-  const hour = h % 12 || 12;
-  return m === 0 ? `${hour}${period}` : `${hour}:${m.toString().padStart(2, "0")}${period}`;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
 function timeToHours(timeStr: string | null): number {
   if (!timeStr) return 0;
   const [h, m] = timeStr.split(":").map(Number);
   return h + m / 60;
+}
+
+// hour: typeable number 0–23 | minute: 15-min select (00/15/30/45)
+function SplitTimeInput({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  const parts = value ? value.split(":").map(Number) : [0, 0];
+  const h = isNaN(parts[0]) ? 0 : parts[0];
+  const m = isNaN(parts[1]) ? 0 : parts[1];
+
+  const setH = (raw: string) => {
+    const n = parseInt(raw);
+    const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+  };
+  const setM = (raw: string) => {
+    onChange(`${h.toString().padStart(2, "0")}:${raw.padStart(2, "0")}`);
+  };
+
+  const base = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+  return (
+    <div className={`flex items-center gap-1 ${className ?? ""}`}>
+      <input
+        type="number"
+        min={0}
+        max={23}
+        value={h}
+        onChange={(e) => setH(e.target.value)}
+        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        placeholder="HH"
+      />
+      <span className="text-muted-foreground text-sm font-medium">:</span>
+      <select
+        value={m}
+        onChange={(e) => setM(e.target.value)}
+        className={`${base} w-16`}
+      >
+        {[0, 15, 30, 45].map((min) => (
+          <option key={min} value={min}>{min.toString().padStart(2, "0")}</option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 // ── Aggregate helpers ─────────────────────────────────────────────────
@@ -324,18 +354,14 @@ function ManualSchedulingModal({
               </select>
 
               {/* Time range */}
-              <input
-                type="time"
-                className={inputClass}
+              <SplitTimeInput
                 value={row.startTime}
-                onChange={(e) => updateRow(row.id, { startTime: e.target.value })}
+                onChange={(v) => updateRow(row.id, { startTime: v })}
               />
               <span className="text-xs text-muted-foreground">to</span>
-              <input
-                type="time"
-                className={inputClass}
+              <SplitTimeInput
                 value={row.endTime}
-                onChange={(e) => updateRow(row.id, { endTime: e.target.value })}
+                onChange={(v) => updateRow(row.id, { endTime: v })}
               />
 
               {/* Coverage: min staff */}

@@ -44,11 +44,6 @@ const AVAIL_COLORS: Record<AvailabilityRuleType, string> = {
 
 // ── Time helpers ─────────────────────────────────────────────────────
 
-const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(new Date(2000, 0, 1, 13));
-  return formatted.includes("13");
-})();
-
 function timeToHours(t: string | null | undefined): number {
   if (!t) return 0;
   const [h, m] = t.split(":").map(Number);
@@ -56,10 +51,8 @@ function timeToHours(t: string | null | undefined): number {
 }
 
 function formatHourLabel(hour: number): string {
-  if (is24Hour) return `${String(hour).padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
+  if (hour === 24) return "00:00";
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -134,7 +127,7 @@ function MiniTimeline({
               className="absolute text-[9px] text-muted-foreground -translate-x-1/2"
               style={{ left: `${((h - GRID_START) / GRID_HOURS) * 100}%` }}
             >
-              {h === 24 ? (is24Hour ? "00:00" : "12am") : formatHourLabel(h)}
+              {formatHourLabel(h)}
             </span>
           ))}
         </div>

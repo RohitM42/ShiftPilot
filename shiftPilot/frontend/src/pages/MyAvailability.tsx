@@ -49,26 +49,15 @@ const PROPOSAL_STATUS_VARIANT: Record<ProposalStatus, "default" | "success" | "d
 
 // ── Time formatting ──────────────────────────────────────────────────
 
-const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(new Date(2000, 0, 1, 13));
-  return formatted.includes("13");
-})();
-
 function formatHourLabel(hour: number): string {
-  if (hour === 24) return is24Hour ? "00:00" : "12am";
-  if (is24Hour) return `${hour.toString().padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
+  if (hour === 24) return "00:00";
+  return `${hour.toString().padStart(2, "0")}:00`;
 }
 
 function formatRuleTime(timeStr: string | null): string {
   if (!timeStr) return "";
   const [h, m] = timeStr.split(":").map(Number);
-  if (is24Hour) return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
-  const period = h >= 12 ? "pm" : "am";
-  const hour = h % 12 || 12;
-  return m === 0 ? `${hour}${period}` : `${hour}:${m.toString().padStart(2, "0")}${period}`;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
 
 function timeToHours(timeStr: string | null): number {
@@ -150,52 +139,36 @@ const DEFAULT_FORM_ROW: ManualChange = {
 
 const DAY_LABELS_FULL_MODAL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => ({
-  value: h,
-  label: is24Hour
-    ? h.toString().padStart(2, "0") + ":00"
-    : `${h % 12 || 12}${h >= 12 ? "pm" : "am"}`,
-}));
+function SplitTimeInput({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  const parts = value ? value.split(":").map(Number) : [9, 0];
+  const h = isNaN(parts[0]) ? 9 : parts[0];
+  const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-const MINUTE_OPTIONS = [0, 15, 30, 45].map((m) => ({
-  value: m,
-  label: m.toString().padStart(2, "0"),
-}));
-
-function TimePicker({
-  value,
-  onChange,
-  className,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  className?: string;
-}) {
-  const [h, m] = value ? value.split(":").map(Number) : [9, 0];
-  const nearestM = [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - m) < Math.abs(a - m) ? b : a));
-
-  const update = (newH: number, newM: number) => {
-    onChange(`${newH.toString().padStart(2, "0")}:${newM.toString().padStart(2, "0")}`);
+  const setH = (raw: string) => {
+    const n = parseInt(raw);
+    const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+  };
+  const setM = (raw: string) => {
+    onChange(`${h.toString().padStart(2, "0")}:${raw.padStart(2, "0")}`);
   };
 
+  const base = `rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring${className ? ` ${className}` : ""}`;
   return (
     <div className="flex items-center gap-1">
-      <select
-        className={className}
+      <input
+        type="number"
+        min={0}
+        max={23}
         value={h}
-        onChange={(e) => update(Number(e.target.value), nearestM)}
-      >
-        {HOUR_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-      <select
-        className={className}
-        value={nearestM}
-        onChange={(e) => update(h, Number(e.target.value))}
-      >
-        {MINUTE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+        onChange={(e) => setH(e.target.value)}
+        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        placeholder="HH"
+      />
+      <span className="text-muted-foreground text-sm font-medium">:</span>
+      <select value={m} onChange={(e) => setM(e.target.value)} className={`${base} w-16`}>
+        {[0, 15, 30, 45].map((min) => (
+          <option key={min} value={min}>{min.toString().padStart(2, "0")}</option>
         ))}
       </select>
     </div>
@@ -319,16 +292,14 @@ function ManualEditCard({
 
             {!row.all_day && (
               <>
-                <TimePicker
+                <SplitTimeInput
                   value={row.start_time ?? "09:00"}
                   onChange={(v) => updateRow(i, { start_time: v })}
-                  className={selectClass}
                 />
                 <span className="text-xs text-muted-foreground">to</span>
-                <TimePicker
+                <SplitTimeInput
                   value={row.end_time ?? "17:00"}
                   onChange={(v) => updateRow(i, { end_time: v })}
-                  className={selectClass}
                 />
               </>
             )}

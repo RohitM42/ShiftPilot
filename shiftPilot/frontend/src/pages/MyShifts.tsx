@@ -41,29 +41,17 @@ type ViewMode = "week" | "month";
 
 // ── Time formatting ──────────────────────────────────────────────────
 
-const is24Hour = (() => {
-  const formatted = new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-  }).format(new Date(2000, 0, 1, 13));
-  return formatted.includes("13");
-})();
-
 function formatHourLabel(hour: number): string {
-  if (hour === 24) return is24Hour ? "00:00" : "12am";
-  if (is24Hour) return `${hour.toString().padStart(2, "0")}:00`;
-  const period = hour >= 12 ? "pm" : "am";
-  const h = hour % 12 || 12;
-  return `${h}${period}`;
+  if (hour === 24) return "00:00";
+  return `${hour.toString().padStart(2, "0")}:00`;
 }
 
 function formatShiftTime(dt: Date): string {
-  if (is24Hour) return format(dt, "HH:mm");
-  return format(dt, "h:mma").toLowerCase();
+  return format(dt, "HH:mm");
 }
 
 function formatShiftTimeShort(dt: Date): string {
-  if (is24Hour) return format(dt, "HH:mm");
-  return format(dt, "h:mm").toLowerCase();
+  return format(dt, "HH:mm");
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
