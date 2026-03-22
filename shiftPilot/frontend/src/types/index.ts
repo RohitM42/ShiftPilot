@@ -40,7 +40,6 @@ export enum ProposalType {
   AVAILABILITY = "AVAILABILITY",
   COVERAGE = "COVERAGE",
   ROLE_REQUIREMENT = "ROLE_REQUIREMENT",
-  LABOUR_BUDGET = "LABOUR_BUDGET",
 }
 
 export enum ProposalStatus {
@@ -278,16 +277,6 @@ export interface StoreResponse {
 export interface StoreDepartmentResponse {
   store_id: number;
   department_id: number;
-}
-
-// Labour Budgets
-
-export interface LabourBudgetResponse {
-  id: number;
-  store_id: number;
-  department_id: number;
-  week_start_date: string;
-  budget_hours: number;
 }
 
 // Schedule generation

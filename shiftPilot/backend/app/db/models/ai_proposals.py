@@ -12,7 +12,6 @@ class ProposalType(str, Enum):
     AVAILABILITY = "AVAILABILITY"
     COVERAGE = "COVERAGE"
     ROLE_REQUIREMENT = "ROLE_REQUIREMENT"
-    LABOUR_BUDGET = "LABOUR_BUDGET"
 
 
 class ProposalStatus(str, Enum):

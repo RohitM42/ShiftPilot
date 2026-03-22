@@ -296,25 +296,6 @@ class TestAIServiceErrors:
         assert output.status == AIOutputStatus.INVALID
         assert ai_input.processed is True
 
-    @patch("app.services.ai.ai_service.get_llm_provider")
-    def test_labour_budget_returns_error(self, mock_provider_factory, write_db):
-        """Labour budget intent should return error (not yet supported)."""
-        mock_provider = MagicMock()
-        mock_provider.generate_json.return_value = _mock_llm_response({
-            "intent_type": "LABOUR_BUDGET",
-            "summary": "Change labour budget",
-        })
-        mock_provider_factory.return_value = mock_provider
-
-        user = write_db.query(Users).filter(Users.id == MANAGER_USER_ID).first()
-        ai_input = AIInputs(req_by_user_id=user.id, input_text="increase budget for tills")
-        write_db.add(ai_input)
-        write_db.flush()
-
-        output = process_ai_input(write_db, ai_input, user)
-
-        assert output.status == AIOutputStatus.INVALID
-        assert "not yet supported" in output.summary.lower()
 
 
 # ==================== Approval Handler Tests ====================

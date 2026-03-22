@@ -13,7 +13,6 @@ from app.api.routes import (
     time_off_requests,
     coverage_requirements,
     role_requirements,
-    labour_budgets,
     me,
     ai_inputs,
     ai_outputs,
@@ -36,7 +35,6 @@ app.include_router(availability_rules.router, prefix="/api/v1")
 app.include_router(time_off_requests.router, prefix="/api/v1")
 app.include_router(coverage_requirements.router, prefix="/api/v1")
 app.include_router(role_requirements.router, prefix="/api/v1")
-app.include_router(labour_budgets.router, prefix="/api/v1")
 app.include_router(me.router, prefix="/api/v1")
 app.include_router(ai_inputs.router, prefix="/api/v1")
 app.include_router(ai_outputs.router, prefix="/api/v1")

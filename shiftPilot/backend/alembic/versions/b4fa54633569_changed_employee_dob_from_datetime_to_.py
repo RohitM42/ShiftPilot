@@ -1,7 +1,7 @@
 """changed employee dob from datetime to date
 
 Revision ID: b4fa54633569
-Revises: c3696c474e17
+Revises: 04823737aee5
 Create Date: 2026-01-15 00:59:14.447752
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'b4fa54633569'
-down_revision: Union[str, Sequence[str], None] = 'c3696c474e17'
+down_revision: Union[str, Sequence[str], None] = '04823737aee5'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

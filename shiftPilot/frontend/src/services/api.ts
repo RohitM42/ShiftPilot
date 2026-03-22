@@ -3,7 +3,6 @@ import type {
   StoreResponse,
   StoreDepartmentResponse,
   DepartmentResponse,
-  LabourBudgetResponse,
 } from "@/types";
 
 const API_BASE = "/api";
@@ -182,20 +181,6 @@ export const departmentsAdminApi = {
     api.delete<{ id: number; warnings: Array<{ employee_id: number; name: string }> }>(
       `/departments/${id}`
     ),
-};
-
-// Labour Budgets
-export const labourBudgetsApi = {
-  listForStore: (storeId: number) =>
-    api.get<LabourBudgetResponse[]>('/labour-budgets', { params: { store_id: storeId } }),
-  create: (data: {
-    store_id: number;
-    department_id: number;
-    week_start_date: string;
-    budget_hours: number;
-  }) => api.post<LabourBudgetResponse>('/labour-budgets', data),
-  update: (id: number, data: { budget_hours: number }) =>
-    api.put<LabourBudgetResponse>(`/labour-budgets/${id}`, data),
 };
 
 // Users (admin)

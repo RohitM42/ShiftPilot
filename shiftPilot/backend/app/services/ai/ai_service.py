@@ -109,13 +109,6 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, expli
     # 5. Validate intent type
     intent_type = result.get("intent_type")
     if not intent_type or intent_type not in INTENT_TO_PROPOSAL_TYPE:
-        # TODO: Implement NEEDS_CLARIFICATION flow instead of error
-        if intent_type == "LABOUR_BUDGET":
-            return _create_error_output(
-                db, ai_input,
-                "Labour budget changes are not yet supported",
-                model_used=llm_response.model_used,
-            )
         return _create_error_output(
             db, ai_input,
             f"Unrecognised intent type: {intent_type}",
