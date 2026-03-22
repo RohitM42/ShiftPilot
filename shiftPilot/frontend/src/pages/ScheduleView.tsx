@@ -796,6 +796,11 @@ export default function ScheduleView() {
     }
   }
 
+  // Clear dept filter when store changes so stale selection doesn't carry over
+  useEffect(() => {
+    setSelectedDeptId(null);
+  }, [selectedStoreId]);
+
   // Load static data once
   useEffect(() => {
     departmentsApi.list().then((r) => setDepartments(r.data));
@@ -856,6 +861,16 @@ export default function ScheduleView() {
       .catch(() => setShifts([]))
       .finally(() => setLoading(false));
   }, [selectedDate, resolvedStoreId, isAdmin]);
+
+  // Departments scoped to the current store, derived from employee-dept assignments
+  const storeDepts = useMemo(() => {
+    if (!resolvedStoreId || empDepts.size === 0) return departments;
+    const deptIds = new Set<number>();
+    for (const ids of empDepts.values()) {
+      for (const id of ids) deptIds.add(id);
+    }
+    return departments.filter((d) => deptIds.has(d.id));
+  }, [departments, empDepts, resolvedStoreId]);
 
   // Dept map for name lookup
   const deptMap = useMemo(() => {
@@ -960,7 +975,7 @@ export default function ScheduleView() {
             }
           >
             <option value="">All Departments</option>
-            {departments.map((d) => (
+            {storeDepts.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
               </option>
@@ -1066,6 +1081,7 @@ export default function ScheduleView() {
               previewShifts={previewShifts.filter(
                 (p) => format(p.start, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd")
               )}
+              activeDeptId={selectedDeptId}
               onDeleteShift={setPendingDeleteId}
             />
           )}

@@ -48,11 +48,13 @@ export function EmployeeGantt({
   employees,
   shiftsByEmployee,
   previewShifts = [],
+  activeDeptId,
   onDeleteShift,
 }: {
   employees: EmployeeWithUserResponse[];
   shiftsByEmployee: Map<number, ParsedShift[]>;
   previewShifts?: PreviewShift[];
+  activeDeptId?: number | null;
   onDeleteShift?: (shiftId: number) => void;
 }) {
   const [hoveredShiftId, setHoveredShiftId] = useState<number | null>(null);
@@ -159,6 +161,7 @@ export function EmployeeGantt({
                   const left = ((startH - GRID_START) / GRID_HOURS) * 100;
                   const width = ((endH - startH) / GRID_HOURS) * 100;
                   const isDraft = shift.status === ShiftStatus.DRAFT;
+                  const isOffDept = activeDeptId != null && shift.departmentId !== activeDeptId;
 
                   const isHovered = hoveredShiftId === shift.id;
                   return (
@@ -166,26 +169,28 @@ export function EmployeeGantt({
                       key={shift.id}
                       className={cn(
                         "absolute top-1 bottom-1 rounded-md flex items-center overflow-hidden",
-                        isDraft
+                        isOffDept
+                          ? "bg-slate-100 border border-dashed border-slate-400"
+                          : isDraft
                           ? "bg-primary/20 border border-dashed border-primary/60"
                           : "bg-primary border border-primary"
                       )}
                       style={{ left: `${left}%`, width: `${width}%` }}
-                      title={`${emp.firstname} ${emp.surname} · ${shift.departmentName} · ${shift.status}`}
+                      title={`${emp.firstname} ${emp.surname} · ${shift.departmentName} · ${shift.status}${isOffDept ? " (different department)" : ""}`}
                       onMouseEnter={() => setHoveredShiftId(shift.id)}
                       onMouseLeave={() => setHoveredShiftId(null)}
                     >
                       <span
                         className={cn(
                           "text-xs font-semibold truncate flex-1 min-w-0 pl-2",
-                          isDraft ? "text-primary" : "text-primary-foreground"
+                          isOffDept ? "text-slate-500" : isDraft ? "text-primary" : "text-primary-foreground"
                         )}
                       >
                         {formatShiftTime(shift.start)} – {formatShiftTime(shift.end)}
                         <span
                           className={cn(
                             "ml-1.5 font-normal",
-                            isDraft ? "text-primary/70" : "text-primary-foreground/80"
+                            isOffDept ? "text-slate-400" : isDraft ? "text-primary/70" : "text-primary-foreground/80"
                           )}
                         >
                           {shift.departmentName}
@@ -204,7 +209,7 @@ export function EmployeeGantt({
                         <span
                           className={cn(
                             "text-xs font-medium px-2 shrink-0",
-                            isDraft ? "text-primary/70" : "text-primary-foreground/70"
+                            isOffDept ? "text-slate-400" : isDraft ? "text-primary/70" : "text-primary-foreground/70"
                           )}
                         >
                           {shift.hours}h
