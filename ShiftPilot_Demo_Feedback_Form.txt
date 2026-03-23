@@ -1,0 +1,153 @@
+================================================================================
+                     SHIFTPILOT - DEMO FEEDBACK FORM
+                       M&S Store Visit | March 2026
+================================================================================
+
+Thank you for taking the time to view this demo. Your honest feedback is
+invaluable in shaping this product. Please answer as many questions as you can.
+There are no right or wrong answers.
+
+--------------------------------------------------------------------------------
+SECTION A: ABOUT YOU
+--------------------------------------------------------------------------------
+
+Role at M&S:  [ ] Employee / Shop Floor Staff   [ ] Team Manager   [ ] Store Manager
+
+How do you currently manage / receive your shifts?
+  (e.g. paper rota, WhatsApp, a system like Kronos, word of mouth, etc.)
+
+  _____________________________________________________________________________
+
+How comfortable are you using apps or digital tools for work?
+  [ ] Not comfortable at all   [ ] Somewhat comfortable   [ ] Very comfortable
+
+
+--------------------------------------------------------------------------------
+SECTION B: FIRST IMPRESSIONS
+--------------------------------------------------------------------------------
+
+1. After seeing the demo, what was your immediate reaction to the app?
+
+   _____________________________________________________________________________
+   _____________________________________________________________________________
+
+2. Did the app feel easy to navigate and understand?
+   [ ] Yes, very clear   [ ] Mostly yes   [ ] A bit confusing   [ ] Hard to follow
+
+   If confusing, what was unclear?
+
+   _____________________________________________________________________________
+
+3. Does the visual design (layout, colours, icons) feel professional and
+   appropriate for a workplace tool?
+   [ ] Yes   [ ] Mostly   [ ] Needs improvement
+
+   Comments:  __________________________________________________________________
+
+
+--------------------------------------------------------------------------------
+SECTION C: EMPLOYEE FEATURES (All respondents)
+--------------------------------------------------------------------------------
+
+4. How useful would it be to view your upcoming shifts in one place on the app?
+   [ ] Extremely useful   [ ] Quite useful   [ ] Not really useful   [ ] I already have this
+
+
+6. The app shows you a live view of any PENDING changes to your availability
+   before they are confirmed. Would this transparency matter to you?
+   [ ] Yes, I'd want to know in advance   [ ] Doesn't matter   [ ] I'd find it confusing
+
+7. Is there anything about managing your shifts or availability that you currently
+   find frustrating that you'd hope an app like this could solve?
+
+   _____________________________________________________________________________
+   _____________________________________________________________________________
+
+
+--------------------------------------------------------------------------------
+SECTION D: MANAGER FEATURES (Team Managers / Store Managers only)
+--------------------------------------------------------------------------------
+
+8. How much time do you currently spend each week creating or adjusting the rota?
+   [ ] Under 30 mins   [ ] 30 mins – 1 hour   [ ] 1–3 hours   [ ] 3+ hours
+
+9. The app can generate an AI-suggested schedule based on staff availability and
+   scheduling rules. How confident would you be using an AI-generated rota?
+   [ ] Very confident — I'd use it as-is
+   [ ] Mostly confident — I'd review and tweak it
+   [ ] Not very confident — I'd want full control
+   [ ] I wouldn't use it
+
+   What would make you more confident in the AI suggestions?
+
+   _____________________________________________________________________________
+
+10. The app lets you define scheduling rules (e.g. minimum hours per person,
+    required coverage per shift, days off rules). How important is it that you
+    can customise these rules yourself vs. having fixed defaults?
+    [ ] Very important — every store is different
+    [ ] Somewhat important
+    [ ] Not important — sensible defaults are fine
+
+11. The app shows a "proposal review" step where you can see exactly what will
+    change before committing a new schedule. Does this approval workflow give you
+    enough control?
+    [ ] Yes, perfect   [ ] I'd want more control   [ ] I'd want a simpler/quicker process
+
+12. When there are conflicts (e.g. two staff unavailable on the same shift),
+    how would you expect the app to handle it?
+    [ ] Alert me and let me resolve it manually
+    [ ] Have the AI suggest a fix automatically
+    [ ] Both — alert me and suggest options
+
+13. What is the single biggest pain point in your current scheduling process
+    that you would want ShiftPilot to eliminate?
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+
+--------------------------------------------------------------------------------
+SECTION E: CONCERNS & MISSING FEATURES
+--------------------------------------------------------------------------------
+
+14. Do you have any concerns about using a tool like this?
+    (e.g. data privacy, staff resistance, reliability, training time)
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+15. Is there a feature you expected to see in the demo that was missing?
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+16. Would you be likely to use ShiftPilot if it were available in your store?
+    [ ] Definitely   [ ] Probably   [ ] Probably not   [ ] Definitely not
+
+    Reason:  ____________________________________________________________________
+
+
+--------------------------------------------------------------------------------
+SECTION F: OPEN FEEDBACK
+--------------------------------------------------------------------------------
+
+17. What did you like most about what you saw today?
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+18. What would you change or improve first if you could?
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+19. Any other comments or suggestions?
+
+    _____________________________________________________________________________
+    _____________________________________________________________________________
+
+
+================================================================================
+Thank you for your time and honest feedback!
+================================================================================

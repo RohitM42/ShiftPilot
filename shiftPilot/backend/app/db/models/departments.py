@@ -9,3 +9,4 @@ class Departments(Base):
     name: Mapped[str] = mapped_column(String(100),nullable=False,unique=True)
     code: Mapped[str] = mapped_column(String(20),nullable=False,unique=True)
     has_manager_role: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

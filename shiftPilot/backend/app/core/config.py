@@ -19,9 +19,19 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
+    # AI API keys
+    GEMINI_API_KEY: str = ""
+    LLM_PROVIDER: str = "gemini"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    # OpenRouter fallback
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "mistralai/mistral-7b-instruct"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 

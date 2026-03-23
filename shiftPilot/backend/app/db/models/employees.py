@@ -1,6 +1,6 @@
-from sqlalchemy import Integer, DateTime, Boolean, func, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Integer, DateTime, Date, Boolean, func, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 from app.db.database import Base
 
@@ -19,6 +19,6 @@ class Employees(Base):
     is_manager: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     employment_status: Mapped[EmploymentStatus] = mapped_column(SQLEnum(EmploymentStatus, name="employment_status_enum", native_enum=True), nullable=False)
     contracted_weekly_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    dob: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    dob: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

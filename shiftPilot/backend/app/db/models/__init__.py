@@ -13,7 +13,9 @@ from app.db.models.availability_rules import AvailabilityRules, AvailabilityRule
 from app.db.models.time_off_requests import TimeOffRequests, TimeOffStatus, TimeOffReason
 from app.db.models.coverage_requirements import CoverageRequirements
 from app.db.models.role_requirements import RoleRequirements
-from app.db.models.labour_budgets import LabourBudgets
+from app.db.models.ai_inputs import AIInputs
+from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
+from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus, ProposalSource
 
 __all__ = [
     "Base",
@@ -30,7 +32,9 @@ __all__ = [
     "TimeOffRequests",
     "CoverageRequirements",
     "RoleRequirements",
-    "LabourBudgets",
+    "AIInputs",
+    "AIOutputs",
+    "AIProposals",
     # Enums
     "Role",
     "AvailabilityRuleType",
@@ -39,4 +43,8 @@ __all__ = [
     "ShiftStatus",
     "ShiftSource",
     "EmploymentStatus",
+    "AIOutputStatus",
+    "ProposalType",
+    "ProposalStatus",
+    "ProposalSource",
 ]
