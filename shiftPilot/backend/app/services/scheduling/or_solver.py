@@ -85,13 +85,16 @@ def time_to_slot(t: time, day_start_hour: int = DAY_START_HOUR) -> int:
     return (total_minutes - start_minutes) // SLOT_DURATION_MINUTES
 
 
-def get_valid_shift_lengths(is_manager: bool) -> list[int]:
-    """Get valid shift lengths in slots for employee type."""
+def get_valid_shift_lengths(is_manager: bool, allowed_hours: list[int] | None = None) -> list[int]:
+    """Get valid shift lengths in slots for employee type, filtered by store-configured allowed hours."""
     max_hours = MAX_MANAGER_HOURS if is_manager else MAX_REGULAR_HOURS
     min_slots = MIN_SHIFT_HOURS * SLOTS_PER_HOUR
     max_slots = max_hours * SLOTS_PER_HOUR
-    # Only allow shifts starting on the hour (2 slots for 30-min granularity) for now, may change later 
-    return list(range(min_slots, max_slots + 1, SLOTS_PER_HOUR))
+    all_lengths = list(range(min_slots, max_slots + 1, SLOTS_PER_HOUR))
+    if not allowed_hours:
+        return all_lengths
+    allowed_slots = set(h * SLOTS_PER_HOUR for h in allowed_hours)
+    return [l for l in all_lengths if l in allowed_slots]
 
 
 def _get_shift_length_bonus(length_slots: int) -> int:
@@ -206,7 +209,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     shift_vars = {}
     
     for emp in employees:
-        valid_lengths = get_valid_shift_lengths(emp.is_manager)
+        valid_lengths = get_valid_shift_lengths(emp.is_manager, context.allowed_shift_hours)
         avail = availability[emp.id]
         
         for day in range(7):
