@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin
+from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin, get_accessible_store_ids
 from app.db.models.employees import Employees, EmploymentStatus
 from app.db.models.users import Users
 from app.db.models.stores import Stores
@@ -53,6 +53,11 @@ def list_employees(
     )
     if store_id:
         query = query.filter(Employees.store_id == store_id)
+    else:
+        # Scope to accessible stores; get_accessible_store_ids returns None for global admins (no restriction)
+        accessible = get_accessible_store_ids(db, current_user)
+        if accessible is not None:
+            query = query.filter(Employees.store_id.in_(accessible))
 
     results = query.offset(skip).limit(limit).all()
 

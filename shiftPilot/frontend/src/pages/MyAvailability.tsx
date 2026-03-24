@@ -55,7 +55,7 @@ function formatHourLabel(hour: number): string {
 }
 
 function formatRuleTime(timeStr: string | null): string {
-  if (!timeStr) return "";
+  if (!timeStr) return "00:00";
   const [h, m] = timeStr.split(":").map(Number);
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
@@ -500,10 +500,16 @@ export default function MyAvailability() {
   const pendingOverlayRules = useMemo<PendingOverlayRule[]>(() => {
     const result: PendingOverlayRule[] = [];
 
+    const parseEndHour = (t: string | null | undefined): number => {
+      if (!t) return 24;
+      const h = timeToHours(t);
+      return h === 0 ? 24 : h; // "00:00" means midnight = end of day
+    };
+
     if (showManualEdit) {
       for (const c of formChanges) {
         const startH = c.all_day ? 0 : timeToHours(c.start_time ?? "00:00");
-        const endH = c.all_day ? 24 : timeToHours(c.end_time ?? "24:00");
+        const endH = c.all_day ? 24 : parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
       }
     }
@@ -513,7 +519,7 @@ export default function MyAvailability() {
       if (!p.pending_changes) continue;
       for (const c of p.pending_changes) {
         const startH = c.start_time ? timeToHours(c.start_time) : 0;
-        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        const endH = parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: false });
       }
     }
@@ -521,7 +527,7 @@ export default function MyAvailability() {
     if (aiPreview) {
       for (const c of aiPreview.changes) {
         const startH = c.start_time ? timeToHours(c.start_time) : 0;
-        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        const endH = parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
       }
     }

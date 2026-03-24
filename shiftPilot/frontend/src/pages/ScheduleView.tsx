@@ -397,10 +397,11 @@ interface ManualRow {
   startTime: string; // "HH:MM"
   endTime: string;   // "HH:MM"
   departmentId: string;
+  status: "DRAFT" | "PUBLISHED";
 }
 
 function makeRow(id: number, defaultDay: string): ManualRow {
-  return { id, employeeId: "", day: defaultDay, startTime: "09:00", endTime: "17:00", departmentId: "" };
+  return { id, employeeId: "", day: defaultDay, startTime: "09:00", endTime: "17:00", departmentId: "", status: "PUBLISHED" };
 }
 
 function ManualShiftPanel({
@@ -470,7 +471,7 @@ function ManualShiftPanel({
     onPreviewChange(previews);
   }, [rows, deptMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function submit(shiftStatus: "DRAFT" | "PUBLISHED") {
+  async function submit() {
     if (!storeId) return;
     const complete = rows.filter(
       (r) => r.employeeId && r.day && r.startTime && r.endTime && r.departmentId
@@ -487,7 +488,7 @@ function ManualShiftPanel({
             department_id: Number(r.departmentId),
             start_datetime_utc: new Date(`${r.day}T${r.startTime}:00`).toISOString(),
             end_datetime_utc: new Date(`${r.day}T${r.endTime}:00`).toISOString(),
-            status: shiftStatus,
+            status: r.status,
             source: "MANUAL",
           });
           return { row: r, data: res.data as ShiftWithViolationsResponse };
@@ -549,25 +550,49 @@ function ManualShiftPanel({
           <div className="space-y-2">
             {rows.map((row) => {
               const empDeptIds = row.employeeId ? (empDepts.get(Number(row.employeeId)) ?? []) : [];
-              const availableDepts = departments.filter((d) => empDeptIds.includes(d.id));
+              const availableDepts = row.employeeId
+                ? departments.filter((d) => empDeptIds.includes(d.id))
+                : departments;
+
+              const availableEmployees = row.departmentId
+                ? employees.filter((e) => (empDepts.get(e.id) ?? []).includes(Number(row.departmentId)))
+                : employees;
 
               return (
                 <div key={row.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background/50 px-3 py-2">
-                  {/* Employee */}
+                  {/* Department — scoped to employee's depts if employee selected */}
+                  <select
+                    className={selectClass}
+                    value={row.departmentId}
+                    onChange={(e) => {
+                      const deptId = e.target.value;
+                      const empStillValid = row.employeeId && (empDepts.get(Number(row.employeeId)) ?? []).includes(Number(deptId));
+                      updateRow(row.id, { departmentId: deptId, employeeId: empStillValid ? row.employeeId : "" });
+                    }}
+                  >
+                    <option value="">Department…</option>
+                    {availableDepts.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+
+                  {/* Employee — scoped to department's employees if department selected */}
                   <select
                     className={selectClass}
                     value={row.employeeId}
                     onChange={(e) => {
                       const empId = e.target.value;
+                      const newEmpDeptIds = empId ? (empDepts.get(Number(empId)) ?? []) : [];
+                      const deptStillValid = row.departmentId && newEmpDeptIds.includes(Number(row.departmentId));
                       const primaryDeptId = empId ? empPrimaryDepts.get(Number(empId)) : undefined;
                       updateRow(row.id, {
                         employeeId: empId,
-                        departmentId: primaryDeptId ? String(primaryDeptId) : "",
+                        departmentId: deptStillValid ? row.departmentId : (primaryDeptId ? String(primaryDeptId) : ""),
                       });
                     }}
                   >
                     <option value="">Employee…</option>
-                    {employees.map((e) => (
+                    {availableEmployees.map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.firstname} {e.surname}
                       </option>
@@ -590,18 +615,23 @@ function ManualShiftPanel({
                   <span className="text-xs text-muted-foreground">to</span>
                   <SplitTimeInput value={row.endTime} onChange={(v) => updateRow(row.id, { endTime: v })} />
 
-                  {/* Department — filtered to employee's depts */}
-                  <select
-                    className={selectClass}
-                    value={row.departmentId}
-                    onChange={(e) => updateRow(row.id, { departmentId: e.target.value })}
-                    disabled={!row.employeeId}
+                  {/* Draft / Published toggle */}
+                  <button
+                    onClick={() => updateRow(row.id, { status: row.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED" })}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                      row.status === "PUBLISHED" ? "bg-primary" : "bg-muted-foreground/30"
+                    )}
+                    title={row.status === "PUBLISHED" ? "Published — click to set Draft" : "Draft — click to set Published"}
                   >
-                    <option value="">Department…</option>
-                    {availableDepts.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
+                    <span className={cn(
+                      "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                      row.status === "PUBLISHED" ? "translate-x-5" : "translate-x-0"
+                    )} />
+                  </button>
+                  <span className="text-xs text-muted-foreground w-16">
+                    {row.status === "PUBLISHED" ? "Published" : "Draft"}
+                  </span>
 
                   <Button
                     variant="ghost"
@@ -654,19 +684,11 @@ function ManualShiftPanel({
                 Cancel
               </Button>
               <Button
-                variant="outline"
                 size="sm"
                 disabled={submitting || completeCount === 0}
-                onClick={() => submit("DRAFT")}
+                onClick={() => submit()}
               >
-                Save as Draft ({completeCount})
-              </Button>
-              <Button
-                size="sm"
-                disabled={submitting || completeCount === 0}
-                onClick={() => submit("PUBLISHED")}
-              >
-                Publish ({completeCount})
+                Save ({completeCount})
               </Button>
             </div>
           </div>
@@ -1347,7 +1369,7 @@ export default function ScheduleView() {
             employees={employees}
             empDepts={empDepts}
             empPrimaryDepts={empPrimaryDepts}
-            departments={departments}
+            departments={storeDepts}
             selectedDate={selectedDate}
             expanded={manualExpanded}
             onToggle={() => setManualExpanded((v) => !v)}

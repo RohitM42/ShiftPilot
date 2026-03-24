@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi } from "@/services/api";
+import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi, employeesApi } from "@/services/api";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { ProposalType, ProposalStatus } from "@/types";
@@ -130,10 +130,20 @@ function computeAggregateIntervals(rules: CoverageRequirementResponse[]): Aggreg
   return merged;
 }
 
-function coverageIntensityClass(staff: number): string {
-  if (staff >= 4) return "bg-blue-400 border-blue-500 text-blue-900";
-  if (staff === 3) return "bg-blue-300 border-blue-400 text-blue-900";
-  if (staff === 2) return "bg-blue-200 border-blue-300 text-blue-800";
+function getCoverageThresholds(total: number): [number, number, number] {
+  if (total <= 0) return [1, 2, 3];
+  return [
+    Math.max(1, Math.round(total * 0.10)),
+    Math.max(2, Math.round(total * 0.25)),
+    Math.max(3, Math.round(total * 0.40)),
+  ];
+}
+
+function coverageIntensityClass(staff: number, total: number): string {
+  const [t1, t2, t3] = getCoverageThresholds(total);
+  if (staff > t3) return "bg-blue-400 border-blue-500 text-blue-900";
+  if (staff > t2) return "bg-blue-300 border-blue-400 text-blue-900";
+  if (staff > t1) return "bg-blue-200 border-blue-300 text-blue-800";
   return "bg-blue-100 border-blue-200 text-blue-700";
 }
 
@@ -496,12 +506,14 @@ function CoverageGrid({
   deptMap,
   expandedDays,
   onToggleExpand,
+  totalEmployees,
 }: {
   coverageRules: CoverageRequirementResponse[];
   deptFilter: number | null;
   deptMap: Map<number, Department>;
   expandedDays: Set<number>;
   onToggleExpand: (day: number) => void;
+  totalEmployees: number;
 }) {
   const activeRules = useMemo(() => coverageRules.filter((r) => r.active), [coverageRules]);
 
@@ -561,7 +573,7 @@ function CoverageGrid({
                         key={i}
                         className={cn(
                           "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
-                          coverageIntensityClass(interval.totalStaff)
+                          coverageIntensityClass(interval.totalStaff, totalEmployees)
                         )}
                         style={{ left: `${left}%`, width: `${width}%` }}
                         title={`${interval.totalStaff} staff required (aggregate)`}
@@ -655,17 +667,27 @@ function CoverageGrid({
       </div>
 
       {/* Heatmap legend (aggregate mode only) */}
-      {deptFilter == null && (
-        <div className="flex flex-wrap items-center gap-4 text-xs px-4 py-2 border-t">
-          {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="flex items-center gap-1.5">
-              <div className={cn("w-4 h-3 rounded-sm border", coverageIntensityClass(n))} />
-              <span className="text-muted-foreground">{n === 4 ? "4+" : n} staff</span>
-            </div>
-          ))}
-          <span className="text-muted-foreground ml-1">· Click a day to expand by department</span>
-        </div>
-      )}
+      {deptFilter == null && (() => {
+        const [t1, t2, t3] = getCoverageThresholds(totalEmployees);
+        const bandLabel = (lo: number, hi: number) => lo === hi ? `${lo}` : `${lo}–${hi}`;
+        const bands: [number, string][] = [
+          [1,      bandLabel(1, t1)],
+          [t1 + 1, bandLabel(t1 + 1, t2)],
+          [t2 + 1, bandLabel(t2 + 1, t3)],
+          [t3 + 1, `${t3 + 1}+`],
+        ];
+        return (
+          <div className="flex flex-wrap items-center gap-4 text-xs px-4 py-2 border-t">
+            {bands.map(([rep, label]) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <div className={cn("w-4 h-3 rounded-sm border", coverageIntensityClass(rep, totalEmployees))} />
+                <span className="text-muted-foreground">{label} staff</span>
+              </div>
+            ))}
+            <span className="text-muted-foreground ml-1">· Click a day to expand by department</span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -755,11 +777,19 @@ function RoleGrid({
     const blockClass = roleBlockClass(rule.requires_manager, rule.requires_keyholder);
     const deptName = rule.department_id != null ? (deptMap.get(rule.department_id)?.name ?? `Dept ${rule.department_id}`) : null;
 
+    const both = rule.requires_manager && rule.requires_keyholder;
+    const verticalClass = both
+      ? "top-1.5 bottom-1.5"
+      : rule.requires_manager
+      ? "top-1.5 bottom-[52%]"
+      : "top-[52%] bottom-1.5";
+
     return (
       <div
         key={rule.id}
         className={cn(
-          "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
+          "absolute rounded-md border flex items-center px-2 overflow-hidden",
+          verticalClass,
           blockClass
         )}
         style={{ left: `${left}%`, width: `${width}%` }}
@@ -832,10 +862,6 @@ function RoleGrid({
         <div className="flex items-center gap-1.5">
           <div className="w-4 h-3 rounded-sm bg-amber-100 border border-amber-300" />
           <span className="text-muted-foreground">Keyholder</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm bg-indigo-100 border border-indigo-300" />
-          <span className="text-muted-foreground">Manager + Keyholder</span>
         </div>
       </div>
     </div>
@@ -941,6 +967,7 @@ export default function SchedulingRules() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [proposals, setProposals] = useState<EnrichedProposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalEmployees, setTotalEmployees] = useState(0);
 
   const [activeTab, setActiveTab] = useState<"coverage" | "role">("coverage");
   const [deptFilter, setDeptFilter] = useState<number | null>(null);
@@ -1012,14 +1039,16 @@ export default function SchedulingRules() {
   const load = async () => {
     setLoading(true);
     try {
-      const [coverageRes, roleRes, deptsRes] = await Promise.all([
+      const [coverageRes, roleRes, deptsRes, empRes] = await Promise.all([
         coverageApi.list(storeId != null ? { store_id: storeId } : {}),
         roleRequirementsApi.list(storeId != null ? { store_id: storeId } : {}),
         departmentsApi.list(),
+        employeesApi.list(storeId ?? undefined),
       ]);
       setCoverageRules(coverageRes.data);
       setRoleRules(roleRes.data);
       setDepartments(deptsRes.data);
+      setTotalEmployees(empRes.data.length);
 
       const proposalsRes = storeId != null
         ? await aiProposalsApi.getByStore(storeId).catch(() => ({ data: [] }))
@@ -1232,19 +1261,21 @@ export default function SchedulingRules() {
               ))}
             </select>
           )}
-          {/* Department filter */}
-          <select
-            className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-            value={deptFilter ?? ""}
-            onChange={(e) => handleDeptFilter(e.target.value === "" ? null : parseInt(e.target.value))}
-          >
-            <option value="">All departments</option>
-            {relevantDepts.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          {/* Department filter — coverage tab only */}
+          {activeTab === "coverage" && (
+            <select
+              className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              value={deptFilter ?? ""}
+              onChange={(e) => handleDeptFilter(e.target.value === "" ? null : parseInt(e.target.value))}
+            >
+              <option value="">All departments</option>
+              {relevantDepts.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          )}
           <Button
             variant={showManualEdit ? "secondary" : "outline"}
             size="sm"
@@ -1269,7 +1300,7 @@ export default function SchedulingRules() {
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setDeptFilter(null); }}
           >
             {tab === "coverage" ? "Coverage Requirements" : "Role Requirements"}
           </button>
@@ -1307,6 +1338,7 @@ export default function SchedulingRules() {
                     deptMap={deptMap}
                     expandedDays={expandedDays}
                     onToggleExpand={toggleExpand}
+                    totalEmployees={totalEmployees}
                   />
                   <CompactCoverageView
                     coverageRules={coverageRules}

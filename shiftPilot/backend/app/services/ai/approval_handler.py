@@ -62,6 +62,19 @@ def _parse_time(t: Optional[str]) -> Optional[time]:
     return time(int(parts[0]), int(parts[1]))
 
 
+def _start_mins(t: Optional[time]) -> int:
+    """Convert a start time to minutes since midnight. None = 0 (start of day)."""
+    return 0 if t is None else t.hour * 60 + t.minute
+
+
+def _end_mins(t: Optional[time]) -> int:
+    """Convert an end time to minutes since midnight. None or 00:00 = 1440 (end of day)."""
+    if t is None:
+        return 1440
+    mins = t.hour * 60 + t.minute
+    return 1440 if mins == 0 else mins
+
+
 def _times_overlap(
     new_start: Optional[time],
     new_end: Optional[time],
@@ -69,11 +82,10 @@ def _times_overlap(
     ex_end: Optional[time],
 ) -> bool:
     """Return True if two time ranges overlap. None means all-day (00:00–24:00)."""
-    # Represent all-day as 0 and 1440 minutes for comparison
-    ns = 0 if new_start is None else new_start.hour * 60 + new_start.minute
-    ne = 1440 if new_end is None else new_end.hour * 60 + new_end.minute
-    es = 0 if ex_start is None else ex_start.hour * 60 + ex_start.minute
-    ee = 1440 if ex_end is None else ex_end.hour * 60 + ex_end.minute
+    ns = _start_mins(new_start)
+    ne = _end_mins(new_end)
+    es = _start_mins(ex_start)
+    ee = _end_mins(ex_end)
     return ns < ee and ne > es
 
 
@@ -94,12 +106,12 @@ def _resolve_conflicts(
         AvailabilityRules.active == True,
     ).all()
 
-    ns = 0 if new_start is None else new_start.hour * 60 + new_start.minute
-    ne = 1440 if new_end is None else new_end.hour * 60 + new_end.minute
+    ns = _start_mins(new_start)
+    ne = _end_mins(new_end)
 
     for ex in existing:
-        es = 0 if ex.start_time_local is None else ex.start_time_local.hour * 60 + ex.start_time_local.minute
-        ee = 1440 if ex.end_time_local is None else ex.end_time_local.hour * 60 + ex.end_time_local.minute
+        es = _start_mins(ex.start_time_local)
+        ee = _end_mins(ex.end_time_local)
 
         if not (ns < ee and ne > es):
             continue  # no overlap
@@ -168,19 +180,13 @@ def _merge_adjacent_same_type(db: Session, employee_id: int, day: int) -> None:
     if len(rules) < 2:
         return
 
-    def _start(r: AvailabilityRules) -> int:
-        return 0 if r.start_time_local is None else r.start_time_local.hour * 60 + r.start_time_local.minute
-
-    def _end(r: AvailabilityRules) -> int:
-        return 1440 if r.end_time_local is None else r.end_time_local.hour * 60 + r.end_time_local.minute
-
-    sorted_rules = sorted(rules, key=_start)
+    sorted_rules = sorted(rules, key=lambda r: _start_mins(r.start_time_local))
 
     i = 0
     while i < len(sorted_rules) - 1:
         cur = sorted_rules[i]
         nxt = sorted_rules[i + 1]
-        if cur.rule_type == nxt.rule_type and _end(cur) == _start(nxt):
+        if cur.rule_type == nxt.rule_type and _end_mins(cur.end_time_local) == _start_mins(nxt.start_time_local):
             cur.end_time_local = nxt.end_time_local
             nxt.active = False
             sorted_rules.pop(i + 1)
@@ -241,6 +247,105 @@ def _apply_availability_changes(db: Session, result: dict, approved_by: int) -> 
             _merge_adjacent_same_type(db, employee_id, day)
 
 
+def _add_or_reactivate_coverage(
+    db: Session,
+    store_id: int,
+    department_id: int,
+    day: int,
+    start: Optional[time],
+    end: Optional[time],
+    min_staff: int,
+    max_staff: Optional[int],
+    approved_by: int,
+) -> None:
+    """
+    Insert a coverage rule, or reactivate+update an existing inactive one if the
+    unique key (store, dept, day, start, end) already exists. Avoids UniqueViolation
+    when the same time range was previously deactivated.
+    """
+    db.flush()  # commit pending deactivations before querying
+    existing = db.query(CoverageRequirements).filter(
+        CoverageRequirements.store_id == store_id,
+        CoverageRequirements.department_id == department_id,
+        CoverageRequirements.day_of_week == day,
+        CoverageRequirements.start_time_local == start,
+        CoverageRequirements.end_time_local == end,
+    ).first()
+    if existing:
+        existing.active = True
+        existing.min_staff = min_staff
+        existing.max_staff = max_staff
+        existing.last_modified_by_user_id = approved_by
+    else:
+        db.add(CoverageRequirements(
+            store_id=store_id,
+            department_id=department_id,
+            day_of_week=day,
+            start_time_local=start,
+            end_time_local=end,
+            min_staff=min_staff,
+            max_staff=max_staff,
+            active=True,
+            last_modified_by_user_id=approved_by,
+        ))
+
+
+def _resolve_conflicts_coverage(
+    db: Session,
+    store_id: int,
+    department_id: int,
+    day: int,
+    new_start: Optional[time],
+    new_end: Optional[time],
+    approved_by: int,
+) -> None:
+    """
+    For every active coverage rule on this day that overlaps the new time range,
+    trim, split, or deactivate it so there are no overlapping windows.
+    Preserves min_staff/max_staff on trimmed pieces.
+    """
+    existing = db.query(CoverageRequirements).filter(
+        CoverageRequirements.store_id == store_id,
+        CoverageRequirements.department_id == department_id,
+        CoverageRequirements.day_of_week == day,
+        CoverageRequirements.active == True,
+    ).all()
+
+    ns = _start_mins(new_start)
+    ne = _end_mins(new_end)
+
+    for ex in existing:
+        es = _start_mins(ex.start_time_local)
+        ee = _end_mins(ex.end_time_local)
+
+        if not (ns < ee and ne > es):
+            continue  # no overlap
+
+        # New rule completely covers existing → deactivate
+        if ns <= es and ne >= ee:
+            ex.active = False
+            ex.last_modified_by_user_id = approved_by
+
+        # New rule overlaps only the start of existing → trim start forward
+        elif ns <= es and ne < ee:
+            ex.active = False
+            ex.last_modified_by_user_id = approved_by
+            _add_or_reactivate_coverage(db, store_id, department_id, day, new_end, ex.end_time_local, ex.min_staff, ex.max_staff, approved_by)
+
+        # New rule overlaps only the end of existing → trim end backward
+        elif ns > es and ne >= ee:
+            ex.active = False
+            ex.last_modified_by_user_id = approved_by
+            _add_or_reactivate_coverage(db, store_id, department_id, day, ex.start_time_local, new_start, ex.min_staff, ex.max_staff, approved_by)
+
+        # New rule is inside existing → split into two
+        else:
+            ex.active = False
+            ex.last_modified_by_user_id = approved_by
+            _add_or_reactivate_coverage(db, store_id, department_id, day, ex.start_time_local, new_start, ex.min_staff, ex.max_staff, approved_by)
+            _add_or_reactivate_coverage(db, store_id, department_id, day, new_end, ex.end_time_local, ex.min_staff, ex.max_staff, approved_by)
+
+
 def _merge_adjacent_coverage(db: Session, store_id: int, department_id: int, day: int) -> None:
     """Merge adjacent coverage rules that have identical staff counts."""
     db.flush()
@@ -265,9 +370,16 @@ def _merge_adjacent_coverage(db: Session, store_id: int, department_id: int, day
     while i < len(sorted_rules) - 1:
         cur = sorted_rules[i]
         nxt = sorted_rules[i + 1]
-        if (cur.min_staff == nxt.min_staff and cur.max_staff == nxt.max_staff
-                and _end(cur) == _start(nxt)):
+        max_compat = (
+            cur.max_staff == nxt.max_staff
+            or cur.max_staff is None
+            or nxt.max_staff is None
+        )
+        if cur.min_staff == nxt.min_staff and max_compat and _end(cur) == _start(nxt):
             cur.end_time_local = nxt.end_time_local
+            # keep whichever max_staff is set (prefer non-None)
+            if cur.max_staff is None:
+                cur.max_staff = nxt.max_staff
             nxt.active = False
             sorted_rules.pop(i + 1)
         else:
@@ -325,18 +437,10 @@ def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None
 
         if action == "ADD":
             day = change["day_of_week"]
-            req = CoverageRequirements(
-                store_id=store_id,
-                department_id=department_id,
-                day_of_week=day,
-                start_time_local=_parse_time(change["start_time"]),
-                end_time_local=_parse_time(change["end_time"]),
-                min_staff=change["min_staff"],
-                max_staff=change.get("max_staff"),
-                active=True,
-                last_modified_by_user_id=approved_by,
-            )
-            db.add(req)
+            new_start = _parse_time(change["start_time"])
+            new_end = _parse_time(change["end_time"])
+            _resolve_conflicts_coverage(db, store_id, department_id, day, new_start, new_end, approved_by)
+            _add_or_reactivate_coverage(db, store_id, department_id, day, new_start, new_end, change["min_staff"], change.get("max_staff"), approved_by)
             _merge_adjacent_coverage(db, store_id, department_id, day)
 
         elif action == "REMOVE":
@@ -381,18 +485,36 @@ def _apply_role_requirement_changes(db: Session, result: dict, approved_by: int)
 
         if action == "ADD":
             day = change.get("day_of_week")
-            req = RoleRequirements(
-                store_id=store_id,
-                department_id=department_id,
-                day_of_week=day,
-                start_time_local=_parse_time(change["start_time"]),
-                end_time_local=_parse_time(change["end_time"]),
-                requires_keyholder=change.get("requires_keyholder", False),
-                requires_manager=change.get("requires_manager", False),
-                min_manager_count=change.get("min_manager_count", 0),
-                active=True,
-            )
-            db.add(req)
+            start = _parse_time(change["start_time"])
+            end = _parse_time(change["end_time"])
+            requires_keyholder = change.get("requires_keyholder", False)
+            requires_manager = change.get("requires_manager", False)
+            min_manager_count = change.get("min_manager_count", 0)
+            db.flush()
+            existing_rr = db.query(RoleRequirements).filter(
+                RoleRequirements.store_id == store_id,
+                RoleRequirements.department_id == department_id,
+                RoleRequirements.day_of_week == day,
+                RoleRequirements.start_time_local == start,
+                RoleRequirements.end_time_local == end,
+            ).first()
+            if existing_rr:
+                existing_rr.active = True
+                existing_rr.requires_keyholder = requires_keyholder
+                existing_rr.requires_manager = requires_manager
+                existing_rr.min_manager_count = min_manager_count
+            else:
+                db.add(RoleRequirements(
+                    store_id=store_id,
+                    department_id=department_id,
+                    day_of_week=day,
+                    start_time_local=start,
+                    end_time_local=end,
+                    requires_keyholder=requires_keyholder,
+                    requires_manager=requires_manager,
+                    min_manager_count=min_manager_count,
+                    active=True,
+                ))
             _merge_adjacent_role_requirements(db, store_id, department_id, day)
 
         elif action == "REMOVE":
