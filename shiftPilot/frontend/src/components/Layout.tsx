@@ -14,6 +14,7 @@ import {
   UserCog,
   Sun,
   Moon,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -55,6 +56,13 @@ export function Layout() {
             <Clock size={18} />
             My Availability
           </NavLink>
+
+          {!isManagerOrAdmin && (
+            <NavLink to="/store-schedule" className={navLinkClass}>
+              <CalendarDays size={18} />
+              Store Schedule
+            </NavLink>
+          )}
 
           {isManagerOrAdmin && (
             <>

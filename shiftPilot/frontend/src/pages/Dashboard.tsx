@@ -46,6 +46,22 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </Link>
+
+          {!isManagerOrAdmin && (
+            <Link to="/store-schedule">
+              <Card className="transition-shadow hover:shadow-md cursor-pointer">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Store Schedule
+                  </CardTitle>
+                  <CalendarDays size={18} className="text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <p className="text-lg font-semibold">See who else is working</p>
+                </CardContent>
+              </Card>
+            </Link>
+          )}
         </div>
       </div>
 

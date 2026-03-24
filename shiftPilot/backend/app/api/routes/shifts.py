@@ -127,6 +127,29 @@ def list_shifts(
     return query.order_by(Shifts.start_datetime_utc).offset(skip).limit(limit).all()
 
 
+@router.get("/store-schedule", response_model=List[ShiftResponse])
+def get_store_schedule(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    employee = db.query(Employees).filter(Employees.user_id == current_user.id).first()
+    if not employee:
+        raise HTTPException(status_code=403, detail="No employee record found")
+
+    query = db.query(Shifts).filter(
+        Shifts.store_id == employee.store_id,
+        Shifts.status == ShiftStatus.PUBLISHED,
+    )
+    if start_date:
+        query = query.filter(Shifts.start_datetime_utc >= start_date)
+    if end_date:
+        query = query.filter(Shifts.end_datetime_utc <= end_date)
+
+    return query.order_by(Shifts.start_datetime_utc).limit(500).all()
+
+
 @router.get("/{shift_id}", response_model=ShiftResponse)
 def get_shift(
     shift_id: int,

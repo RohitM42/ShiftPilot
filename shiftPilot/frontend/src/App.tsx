@@ -1,3 +1,4 @@
+import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -16,12 +17,20 @@ import ScheduleSummaryView from "@/pages/ScheduleSummaryView";
 import ProposalView from "@/pages/ProposalView";
 import StoreManagement from "@/pages/admin/StoreManagement";
 import UserManagement from "@/pages/admin/UserManagement";
+import StoreSchedule from "@/pages/StoreSchedule";
 
 function LoginGuard() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
   if (isAuthenticated) return <Navigate to="/" replace />;
   return <Login />;
+}
+
+function EmployeeOnlyGuard({ children }: { children: React.ReactNode }) {
+  const { isManagerOrAdmin, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isManagerOrAdmin) return <Navigate to="/schedule" replace />;
+  return <>{children}</>;
 }
 
 export default function App() {
@@ -48,6 +57,14 @@ export default function App() {
                 <ProtectedRoute requireManagerOrAdmin>
                   <ScheduleView />
                 </ProtectedRoute>
+              }
+            />
+            <Route
+              path="store-schedule"
+              element={
+                <EmployeeOnlyGuard>
+                  <StoreSchedule />
+                </EmployeeOnlyGuard>
               }
             />
             <Route
