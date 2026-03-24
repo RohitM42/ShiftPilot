@@ -21,9 +21,9 @@ const DAY_LABELS_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 const RULE_STYLES = {
   [AvailabilityRuleType.AVAILABLE]: {
-    bg: "bg-gray-100",
-    border: "border-gray-300",
-    text: "text-gray-600",
+    bg: "bg-gray-100 dark:bg-slate-700",
+    border: "border-gray-300 dark:border-slate-500",
+    text: "text-gray-600 dark:text-slate-300",
     label: "Available",
   },
   [AvailabilityRuleType.PREFERRED]: {
@@ -897,8 +897,8 @@ function AvailabilityGrid({ rulesByDay, pendingRules }: { rulesByDay: Map<number
                   return (
                     <>
                       {blockingRules.length === 0 && (
-                        <div className="absolute top-1.5 bottom-1.5 left-0 right-0 rounded-md bg-gray-100 border border-gray-300 flex items-center justify-center">
-                          <span className="text-xs font-semibold text-gray-600">All day available</span>
+                        <div className="absolute top-1.5 bottom-1.5 left-0 right-0 rounded-md bg-gray-100 dark:bg-slate-700 border border-gray-300 dark:border-slate-500 flex items-center justify-center">
+                          <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">All day available</span>
                         </div>
                       )}
                       {availRegions.map((seg, i) => {
@@ -1002,8 +1002,8 @@ function CompactAvailability({ rulesByDay, pendingRules }: { rulesByDay: Map<num
               const blockingRules = dayRules.filter(r => r.ruleType !== AvailabilityRuleType.AVAILABLE);
               if (blockingRules.length === 0) {
                 return (
-                  <div className="rounded-md bg-gray-100 border border-gray-300 px-3 py-2">
-                    <span className="text-xs font-semibold text-gray-600">All day available</span>
+                  <div className="rounded-md bg-gray-100 dark:bg-slate-700 border border-gray-300 dark:border-slate-500 px-3 py-2">
+                    <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">All day available</span>
                   </div>
                 );
               }
@@ -1020,7 +1020,7 @@ function CompactAvailability({ rulesByDay, pendingRules }: { rulesByDay: Map<num
                       return (
                         <div key={`avail-${i}`} className={cn("w-full rounded-md border px-3 py-2 flex items-center justify-between", RULE_STYLES[AvailabilityRuleType.AVAILABLE].border, RULE_STYLES[AvailabilityRuleType.AVAILABLE].bg)}>
                           <span className={cn("text-xs font-semibold", RULE_STYLES[AvailabilityRuleType.AVAILABLE].text)}>{label}</span>
-                          <Badge className="text-[10px] bg-gray-100 text-gray-600 border-gray-300">Available</Badge>
+                          <Badge className="text-[10px] bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300 border-gray-300 dark:border-slate-500">Available</Badge>
                         </div>
                       );
                     }

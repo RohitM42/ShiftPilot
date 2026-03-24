@@ -280,6 +280,12 @@ export interface StoreDepartmentResponse {
   department_id: number;
 }
 
+// Shift with WTR violations (create/update response)
+
+export interface ShiftWithViolationsResponse extends ShiftResponse {
+  violations: string[];
+}
+
 // Schedule generation
 
 export interface UnmetCoverageItem {

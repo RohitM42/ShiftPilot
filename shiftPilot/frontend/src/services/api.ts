@@ -159,6 +159,13 @@ export const shiftsApi = {
     status: string;
     source: string;
   }) => api.post("/shifts", payload),
+  update: (shiftId: number, payload: {
+    department_id?: number;
+    employee_id?: number;
+    start_datetime_utc?: string;
+    end_datetime_utc?: string;
+    status?: string;
+  }) => api.put(`/shifts/${shiftId}`, payload),
   delete: (shiftId: number) => api.delete(`/shifts/${shiftId}`),
 };
 

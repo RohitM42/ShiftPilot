@@ -54,7 +54,7 @@ SLOTS_PER_DAY = (DAY_END_HOUR - DAY_START_HOUR) * SLOTS_PER_HOUR
 MIN_SHIFT_HOURS = 4
 MAX_REGULAR_HOURS = 9
 MAX_MANAGER_HOURS = 12
-MIN_REST_HOURS = 12
+MIN_REST_HOURS = 11
 MAX_CONSECUTIVE_DAYS = 6  # UK Working Time Regulations: at most 6 working days in any 7-day window
 
 # Soft constraint weights (negative = penalty, positive = bonus)

@@ -12,8 +12,11 @@ import {
   LogOut,
   Store,
   UserCog,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -25,6 +28,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { user, logout, isManagerOrAdmin, isAdmin, highestRole } = useAuth();
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="flex h-screen">
@@ -107,6 +111,15 @@ export function Layout() {
               {highestRole.toLowerCase()}
             </p>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-3 text-muted-foreground"
+            onClick={toggle}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

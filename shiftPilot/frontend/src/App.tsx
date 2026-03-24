@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Layout } from "@/components/Layout";
 import { Role } from "@/types";
@@ -26,6 +27,7 @@ function LoginGuard() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginGuard />} />
@@ -109,6 +111,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

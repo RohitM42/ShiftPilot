@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays, isToday, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import type {
   ShiftResponse,
+  ShiftWithViolationsResponse,
   EmployeeWithUserResponse,
   Department,
   Store,
@@ -348,6 +349,10 @@ function GeneratePanel({
   );
 }
 
+// ── Shared styles ─────────────────────────────────────────────────────
+
+const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+
 // ── Shared time input ─────────────────────────────────────────────────
 
 function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -424,11 +429,13 @@ function ManualShiftPanel({
   const [rows, setRows] = useState<ManualRow[]>([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
   const [submitting, setSubmitting] = useState(false);
   const [nextId, setNextId] = useState(2);
+  const [submitViolations, setSubmitViolations] = useState<{ label: string; messages: string[] }[]>([]);
 
   // Reset rows with current date whenever panel opens or closes
   useEffect(() => {
     setRows([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
     setNextId(2);
+    setSubmitViolations([]);
     if (!expanded) onPreviewChange([]);
   }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -472,9 +479,9 @@ function ManualShiftPanel({
 
     setSubmitting(true);
     try {
-      await Promise.all(
-        complete.map((r) =>
-          shiftsApi.create({
+      const results = await Promise.all(
+        complete.map(async (r) => {
+          const res = await shiftsApi.create({
             store_id: storeId,
             employee_id: Number(r.employeeId),
             department_id: Number(r.departmentId),
@@ -482,17 +489,29 @@ function ManualShiftPanel({
             end_datetime_utc: new Date(`${r.day}T${r.endTime}:00`).toISOString(),
             status: shiftStatus,
             source: "MANUAL",
-          })
-        )
+          });
+          return { row: r, data: res.data as ShiftWithViolationsResponse };
+        })
       );
       onShiftsChanged();
-      onToggle(); // collapse panel (effect above will clear rows + preview)
+      const withViolations = results.filter((r) => r.data.violations.length > 0);
+      if (withViolations.length > 0) {
+        setSubmitViolations(
+          withViolations.map((r) => {
+            const emp = employees.find((e) => e.id === Number(r.row.employeeId));
+            return {
+              label: emp ? `${emp.firstname} ${emp.surname} on ${r.row.day}` : r.row.day,
+              messages: r.data.violations,
+            };
+          })
+        );
+      } else {
+        onToggle();
+      }
     } finally {
       setSubmitting(false);
     }
   }
-
-  const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
 
   // Week days for the day selector
   const weekDays = useMemo(() => {
@@ -597,6 +616,33 @@ function ManualShiftPanel({
               );
             })}
           </div>
+
+          {submitViolations.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-900">
+                Shifts saved — Working Time Regulation warnings:
+              </p>
+              {submitViolations.map((v, i) => (
+                <div key={i}>
+                  <p className="text-xs font-medium text-amber-800">{v.label}</p>
+                  <ul className="ml-2 space-y-0.5">
+                    {v.messages.map((m, j) => (
+                      <li key={j} className="text-xs text-amber-700">• {m}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => { setSubmitViolations([]); onToggle(); }}
+              >
+                <Check size={12} />
+                Dismiss
+              </Button>
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
@@ -770,9 +816,75 @@ export default function ScheduleView() {
   const [manualExpanded, setManualExpanded] = useState(false);
   const [previewShifts, setPreviewShifts] = useState<PreviewShift[]>([]);
 
+  // Edit shift state
+  const [editingShift, setEditingShift] = useState<ParsedShift | null>(null);
+  const [editForm, setEditForm] = useState<{
+    employeeId: string;
+    day: string;
+    startTime: string;
+    endTime: string;
+    departmentId: string;
+    status: string;
+  } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editViolations, setEditViolations] = useState<string[]>([]);
+
   // Delete confirmation
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Reset edit form whenever editing target changes
+  useEffect(() => {
+    if (!editingShift) {
+      setEditForm(null);
+      setEditViolations([]);
+      return;
+    }
+    setEditForm({
+      employeeId: String(editingShift.employeeId),
+      day: format(editingShift.start, "yyyy-MM-dd"),
+      startTime: format(editingShift.start, "HH:mm"),
+      endTime: format(editingShift.end, "HH:mm"),
+      departmentId: String(editingShift.departmentId),
+      status: editingShift.status,
+    });
+    setEditViolations([]);
+  }, [editingShift?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleEditSave() {
+    if (!editingShift || !editForm || !resolvedStoreId) return;
+    setEditSaving(true);
+    setEditViolations([]);
+    try {
+      const res = await shiftsApi.update(editingShift.id, {
+        department_id: Number(editForm.departmentId),
+        start_datetime_utc: new Date(`${editForm.day}T${editForm.startTime}:00`).toISOString(),
+        end_datetime_utc: new Date(`${editForm.day}T${editForm.endTime}:00`).toISOString(),
+        status: editForm.status,
+      });
+      const data = res.data as ShiftWithViolationsResponse;
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      const r = await shiftsApi.list({
+        store_id: resolvedStoreId,
+        start_date: dayStart.toISOString(),
+        end_date: dayEnd.toISOString(),
+        limit: 500,
+      });
+      setShifts(r.data);
+      if (data.violations.length > 0) {
+        setEditViolations(data.violations);
+      } else {
+        setEditingShift(null);
+      }
+    } catch {
+      // keep form open on error
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function confirmDelete() {
     if (!pendingDeleteId || !resolvedStoreId) return;
@@ -938,6 +1050,103 @@ export default function ScheduleView() {
 
   const dateLabel = format(selectedDate, "EEEE, d MMMM yyyy");
 
+  const weekDays = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(weekMonday, i);
+        return { value: format(d, "yyyy-MM-dd"), label: format(d, "EEE d MMM") };
+      }),
+    [weekMonday]
+  );
+
+  // Build the inline edit form rendered inside the gantt row
+  const editFormContent = editingShift && editForm ? (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          className={selectClass}
+          value={editForm.day}
+          onChange={(e) => setEditForm({ ...editForm, day: e.target.value })}
+        >
+          {weekDays.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+
+        <SplitTimeInput value={editForm.startTime} onChange={(v) => setEditForm({ ...editForm, startTime: v })} />
+        <span className="text-xs text-muted-foreground">to</span>
+        <SplitTimeInput value={editForm.endTime} onChange={(v) => setEditForm({ ...editForm, endTime: v })} />
+
+        <select
+          className={selectClass}
+          value={editForm.departmentId}
+          onChange={(e) => setEditForm({ ...editForm, departmentId: e.target.value })}
+        >
+          {(empDepts.get(Number(editForm.employeeId)) ?? []).map((deptId) => {
+            const dept = departments.find((d) => d.id === deptId);
+            return dept ? <option key={dept.id} value={dept.id}>{dept.name}</option> : null;
+          })}
+        </select>
+
+        {/* Draft / Published toggle */}
+        <button
+          onClick={() =>
+            setEditForm({
+              ...editForm,
+              status: editForm.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED",
+            })
+          }
+          className={cn(
+            "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+            editForm.status === "PUBLISHED" ? "bg-primary" : "bg-muted-foreground/30"
+          )}
+          title={editForm.status === "PUBLISHED" ? "Published — click to set Draft" : "Draft — click to set Published"}
+        >
+          <span
+            className={cn(
+              "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+              editForm.status === "PUBLISHED" ? "translate-x-5" : "translate-x-0"
+            )}
+          />
+        </button>
+        <span className="text-xs text-muted-foreground">
+          {editForm.status === "PUBLISHED" ? "Published" : "Draft"}
+        </span>
+
+        <div className="flex gap-2 ml-auto">
+          <Button variant="outline" size="sm" onClick={() => setEditingShift(null)}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={editSaving} onClick={handleEditSave}>
+            {editSaving ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </div>
+
+      {editViolations.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 space-y-1">
+          <p className="text-xs font-semibold text-amber-800">
+            Saved — Working Time Regulation warnings:
+          </p>
+          <ul className="space-y-0.5">
+            {editViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-700">• {v}</li>
+            ))}
+          </ul>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 mt-1"
+            onClick={() => setEditingShift(null)}
+          >
+            <Check size={12} />
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1083,6 +1292,10 @@ export default function ScheduleView() {
               )}
               activeDeptId={selectedDeptId}
               onDeleteShift={setPendingDeleteId}
+              onEditShift={(shift) => setEditingShift((prev) => prev?.id === shift.id ? null : shift)}
+              editingShiftId={editingShift?.id}
+              editingEmployeeId={editingShift?.employeeId}
+              editFormContent={editFormContent}
             />
           )}
 
