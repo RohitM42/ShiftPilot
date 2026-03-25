@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi, employeesApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { ProposalType, ProposalStatus } from "@/types";
@@ -1185,6 +1186,8 @@ export default function SchedulingRules() {
       setCancellingId(null);
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

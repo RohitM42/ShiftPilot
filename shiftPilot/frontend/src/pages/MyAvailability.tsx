@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { meApi, aiInputsApi, aiProposalsApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { AvailabilityRuleType, ProposalType, ProposalStatus } from "@/types";
@@ -578,6 +579,8 @@ export default function MyAvailability() {
       handleAiSubmit(aiText);
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

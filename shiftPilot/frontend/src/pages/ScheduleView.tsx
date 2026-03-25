@@ -20,8 +20,11 @@ import {
   storesApi,
   employeeDepartmentsApi,
   scheduleApi,
+  coverageApi,
+  roleRequirementsApi,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { PageLoader } from "@/components/PageLoader";
 import type {
   ShiftResponse,
   ShiftWithViolationsResponse,
@@ -30,6 +33,8 @@ import type {
   Store,
   EmployeeDepartmentResponse,
   GenerateScheduleResponse,
+  CoverageRequirementResponse,
+  RoleRequirementResponse,
 } from "@/types";
 import { ShiftStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -120,7 +125,8 @@ function GeneratePanel({
         store_id: storeId,
         start_date: weekStart.toISOString(),
         end_date: weekEnd.toISOString(),
-        limit: 500,
+        exclude_cancelled: true,
+        limit: 2000,
       })
       .then((r) => {
         const all = r.data as ShiftResponse[];
@@ -813,6 +819,53 @@ function UnmetRulesPanel({
   );
 }
 
+// ── Constraint status panel ───────────────────────────────────────────
+
+interface ConstraintViolation {
+  type: "coverage" | "role";
+  label: string;
+  detail: string;
+}
+
+function ConstraintStatusPanel({ violations }: { violations: ConstraintViolation[] }) {
+  if (violations.length === 0) return null;
+
+  const coverageViolations = violations.filter((v) => v.type === "coverage");
+  const roleViolations = violations.filter((v) => v.type === "role");
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
+      <h2 className="text-sm font-semibold text-amber-900">Unmet Constraints for This Day</h2>
+
+      {coverageViolations.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-amber-800 mb-1">Coverage</p>
+          <ul className="space-y-1">
+            {coverageViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-800">
+                {v.label} · {v.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {roleViolations.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-amber-800 mb-1">Role Requirements</p>
+          <ul className="space-y-1">
+            {roleViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-800">
+                {v.label} · {v.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────
 
 export default function ScheduleView() {
@@ -835,6 +888,10 @@ export default function ScheduleView() {
   const [empDepts, setEmpDepts] = useState<Map<number, number[]>>(new Map());
   const [empPrimaryDepts, setEmpPrimaryDepts] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
+
+  // Constraint rules
+  const [coverageRules, setCoverageRules] = useState<CoverageRequirementResponse[]>([]);
+  const [roleRules, setRoleRules] = useState<RoleRequirementResponse[]>([]);
 
   // Generate state
   const [generateExpanded, setGenerateExpanded] = useState(false);
@@ -980,6 +1037,13 @@ export default function ScheduleView() {
     });
   }, [resolvedStoreId]);
 
+  // Load constraint rules when store is resolved
+  useEffect(() => {
+    if (!resolvedStoreId) return;
+    coverageApi.list({ store_id: resolvedStoreId }).then((r) => setCoverageRules(r.data));
+    roleRequirementsApi.list({ store_id: resolvedStoreId }).then((r) => setRoleRules(r.data));
+  }, [resolvedStoreId]);
+
   // Load shifts for selected day
   useEffect(() => {
     if (!resolvedStoreId) {
@@ -1044,6 +1108,90 @@ export default function ScheduleView() {
         };
       });
   }, [shifts, showDrafts, deptMap]);
+
+  // Constraint violations for the selected day
+  const constraintViolations = useMemo((): ConstraintViolation[] => {
+    const violations: ConstraintViolation[] = [];
+    const todayDow = (selectedDate.getDay() + 6) % 7; // JS Sun=0 → model Mon=0
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    const empMap = new Map(employees.map((e) => [e.id, e]));
+
+    const toMins = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const overlaps = (shiftStart: Date, shiftEnd: Date, ruleStart: string, ruleEnd: string) => {
+      const rS = toMins(ruleStart);
+      const rE = toMins(ruleEnd);
+      const sS = shiftStart.getHours() * 60 + shiftStart.getMinutes();
+      const sE = shiftEnd.getHours() * 60 + shiftEnd.getMinutes();
+      return sS < rE && sE > rS;
+    };
+
+    // Coverage
+    for (const rule of coverageRules) {
+      if (!rule.active) continue;
+      if (rule.day_of_week !== todayDow) continue;
+      if (!rule.start_time_local || !rule.end_time_local) continue;
+
+      const staffOnShift = parsedShifts.filter(
+        (s) =>
+          s.departmentId === rule.department_id &&
+          format(s.start, "yyyy-MM-dd") === dateStr &&
+          overlaps(s.start, s.end, rule.start_time_local!, rule.end_time_local!)
+      ).length;
+
+      if (staffOnShift < rule.min_staff) {
+        const deptName = deptMap.get(rule.department_id) ?? `Dept ${rule.department_id}`;
+        violations.push({
+          type: "coverage",
+          label: `${deptName} · ${rule.start_time_local.slice(0, 5)}–${rule.end_time_local.slice(0, 5)}`,
+          detail: `needs ${rule.min_staff} staff, ${staffOnShift} scheduled`,
+        });
+      }
+    }
+
+    // Role requirements
+    for (const rule of roleRules) {
+      if (!rule.active) continue;
+      if (rule.day_of_week !== null && rule.day_of_week !== todayDow) continue;
+
+      const scopedShifts = parsedShifts.filter((s) => {
+        if (format(s.start, "yyyy-MM-dd") !== dateStr) return false;
+        if (rule.department_id !== null && s.departmentId !== rule.department_id) return false;
+        return overlaps(s.start, s.end, rule.start_time_local, rule.end_time_local);
+      });
+
+      const deptName = rule.department_id ? deptMap.get(rule.department_id) : null;
+      const scope = deptName ? `${deptName} · ` : "";
+      const timeRange = `${rule.start_time_local.slice(0, 5)}–${rule.end_time_local.slice(0, 5)}`;
+
+      if (rule.requires_manager) {
+        const managerCount = scopedShifts.filter((s) => empMap.get(s.employeeId)?.is_manager).length;
+        if (managerCount < rule.min_manager_count) {
+          violations.push({
+            type: "role",
+            label: `${scope}${timeRange}`,
+            detail: `≥${rule.min_manager_count} manager required, ${managerCount} on shift`,
+          });
+        }
+      }
+
+      if (rule.requires_keyholder) {
+        const hasKeyholder = scopedShifts.some((s) => empMap.get(s.employeeId)?.is_keyholder);
+        if (!hasKeyholder) {
+          violations.push({
+            type: "role",
+            label: `${scope}${timeRange}`,
+            detail: "keyholder required, none on shift",
+          });
+        }
+      }
+    }
+
+    return violations;
+  }, [parsedShifts, coverageRules, roleRules, selectedDate, deptMap, employees]);
 
   // Shifts grouped by employee
   const shiftsByEmployee = useMemo(() => {
@@ -1177,6 +1325,8 @@ export default function ScheduleView() {
     </div>
   ) : null;
 
+  if (loading) return <PageLoader />;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1232,49 +1382,68 @@ export default function ScheduleView() {
         </div>
       </div>
 
-      {/* Week day tabs */}
-      <div className="flex items-center gap-1 flex-wrap">
-        <Button variant="outline" size="icon" onClick={prevWeek}>
-          <ChevronLeft size={16} />
-        </Button>
+      {/* Week day tabs + constraint status card */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-1 flex-wrap">
+          <Button variant="outline" size="icon" onClick={prevWeek}>
+            <ChevronLeft size={16} />
+          </Button>
 
-        {Array.from({ length: 7 }, (_, i) => {
-          const date = addDays(weekMonday, i);
-          const isSelected =
-            format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
-          const todayDate = isToday(date);
-          return (
-            <button
-              key={i}
-              onClick={() => setSelectedDate(date)}
-              className={`w-16 rounded-md border py-1.5 text-center text-sm transition-colors ${
-                isSelected
-                  ? "border-primary bg-primary/10 text-primary font-medium"
-                  : todayDate
-                  ? "border-primary/40 bg-primary/5 text-foreground hover:bg-primary/10"
-                  : "hover:bg-accent text-muted-foreground"
-              }`}
-            >
-              <span className="block text-xs font-semibold">
-                {format(date, "EEE").toUpperCase()}
+          {Array.from({ length: 7 }, (_, i) => {
+            const date = addDays(weekMonday, i);
+            const isSelected =
+              format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+            const todayDate = isToday(date);
+            return (
+              <button
+                key={i}
+                onClick={() => setSelectedDate(date)}
+                className={`w-16 rounded-md border py-1.5 text-center text-sm transition-colors ${
+                  isSelected
+                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    : todayDate
+                    ? "border-primary/40 bg-primary/5 text-foreground hover:bg-primary/10"
+                    : "hover:bg-accent text-muted-foreground"
+                }`}
+              >
+                <span className="block text-xs font-semibold">
+                  {format(date, "EEE").toUpperCase()}
+                </span>
+                <span className="block text-xs">{format(date, "d MMM")}</span>
+              </button>
+            );
+          })}
+
+          <Button variant="outline" size="icon" onClick={nextWeek}>
+            <ChevronRight size={16} />
+          </Button>
+
+          <Button
+            variant={isToday(selectedDate) ? "default" : "outline"}
+            size="sm"
+            className="text-xs ml-1"
+            onClick={goToday}
+          >
+            Today
+          </Button>
+        </div>
+
+        {/* Constraint status card */}
+        {(resolvedStoreId || !isAdmin) && !loading && (
+          constraintViolations.length === 0 ? (
+            <div className="rounded-lg border bg-card px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+              <Check size={12} className="text-green-500 shrink-0" />
+              All constraints met
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-xs text-amber-700 shrink-0">
+              <span className="rounded-full bg-amber-200 border border-amber-400 px-2 py-0.5 font-semibold">
+                {constraintViolations.length}
               </span>
-              <span className="block text-xs">{format(date, "d MMM")}</span>
-            </button>
-          );
-        })}
-
-        <Button variant="outline" size="icon" onClick={nextWeek}>
-          <ChevronRight size={16} />
-        </Button>
-
-        <Button
-          variant={isToday(selectedDate) ? "default" : "outline"}
-          size="sm"
-          className="text-xs ml-1"
-          onClick={goToday}
-        >
-          Today
-        </Button>
+              unmet constraints · see below
+            </div>
+          )
+        )}
       </div>
 
       {/* Delete confirmation dialog */}
@@ -1398,7 +1567,7 @@ export default function ScheduleView() {
             onPreviewChange={setPreviewShifts}
           />
 
-          {/* Unmet rules */}
+          {/* Unmet rules from last generation */}
           {generateResult && (
             <UnmetRulesPanel
               result={generateResult}
@@ -1406,6 +1575,9 @@ export default function ScheduleView() {
               deptMap={deptMap}
             />
           )}
+
+          {/* Constraint violations for selected day */}
+          {!loading && <ConstraintStatusPanel violations={constraintViolations} />}
         </>
       )}
     </div>

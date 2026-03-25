@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { aiProposalsApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import { ProposalStatus, ProposalType } from "@/types";
 import type { AIProposalResponse } from "@/types";
 
@@ -417,6 +418,8 @@ export default function ProposalReview() {
   };
 
   const pendingCount = proposals.filter((p) => p.status === ProposalStatus.PENDING).length;
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-5">

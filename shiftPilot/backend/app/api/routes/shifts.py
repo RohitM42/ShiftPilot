@@ -96,6 +96,7 @@ def list_shifts(
     employee_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    exclude_cancelled: bool = False,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -103,15 +104,15 @@ def list_shifts(
 ):
     # get stores user can access
     accessible_stores = get_accessible_store_ids(db, current_user)
-    
+
     query = db.query(Shifts)
-    
+
     # filter by accessible stores (unless global admin)
     if accessible_stores is not None:
         if store_id and store_id not in accessible_stores:
             raise HTTPException(status_code=403, detail="No access to this store")
         query = query.filter(Shifts.store_id.in_(accessible_stores))
-    
+
     #optional filters
     if store_id:
         query = query.filter(Shifts.store_id == store_id)
@@ -123,6 +124,8 @@ def list_shifts(
         query = query.filter(Shifts.start_datetime_utc >= start_date)
     if end_date:
         query = query.filter(Shifts.end_datetime_utc <= end_date)
+    if exclude_cancelled:
+        query = query.filter(Shifts.status != ShiftStatus.CANCELLED)
 
     return query.order_by(Shifts.start_datetime_utc).offset(skip).limit(limit).all()
 

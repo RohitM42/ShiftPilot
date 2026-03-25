@@ -6,6 +6,7 @@ import { shiftsApi, employeesApi, departmentsApi } from "@/services/api";
 import type { ShiftResponse, EmployeeWithUserResponse, Department } from "@/types";
 import { ShiftStatus } from "@/types";
 import { EmployeeGantt, type ParsedShift } from "@/components/EmployeeGantt";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function StoreSchedule() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -104,6 +105,8 @@ export default function StoreSchedule() {
       (shiftsByEmployee.get(e.id) ?? []).some((s) => s.departmentId === selectedDeptId)
     );
   }, [employees, selectedDeptId, shiftsByEmployee]);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

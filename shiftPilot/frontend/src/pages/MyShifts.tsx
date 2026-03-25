@@ -18,6 +18,7 @@ import {
 } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar, LayoutList } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageLoader } from "@/components/PageLoader";
 import { meApi } from "@/services/api";
 import type { ShiftResponse } from "@/types";
 import { ShiftStatus } from "@/types";
@@ -182,6 +183,8 @@ export default function MyShifts() {
     : view === "month" && isCurrMonth
       ? "This month"
       : null;
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">
