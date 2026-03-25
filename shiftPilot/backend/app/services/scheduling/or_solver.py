@@ -17,7 +17,7 @@ Constraint Priority (via weights):
 
 Hard constraints:
 - One shift per day per employee
-- 12-hour rest between consecutive days (within week)
+- 11-hour rest between consecutive days (within week)
 - Max 6 working days in any 7-day rolling window (UK Working Time Regulations), cross-week aware
 """
 
@@ -271,7 +271,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                 else:
                     works_var[emp.id][day] = 0  # no valid shifts available this day
 
-    # 2. 12-hour rest between consecutive days
+    # 2. 11-hour rest between consecutive days
     for emp in employees:
         for day in range(6):
             today_shifts = get_emp_day_shifts(emp.id, day)
