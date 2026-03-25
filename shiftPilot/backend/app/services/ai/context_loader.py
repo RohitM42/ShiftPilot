@@ -122,7 +122,6 @@ def load_coverage_context(db: Session, store_id: int, department_id: Optional[in
             "start_time": r.start_time_local.isoformat() if r.start_time_local else None,
             "end_time": r.end_time_local.isoformat() if r.end_time_local else None,
             "min_staff": r.min_staff,
-            "max_staff": r.max_staff,
         }
         for r in rows
     ]

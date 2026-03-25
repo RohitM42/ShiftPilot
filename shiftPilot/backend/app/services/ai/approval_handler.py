@@ -370,16 +370,8 @@ def _merge_adjacent_coverage(db: Session, store_id: int, department_id: int, day
     while i < len(sorted_rules) - 1:
         cur = sorted_rules[i]
         nxt = sorted_rules[i + 1]
-        max_compat = (
-            cur.max_staff == nxt.max_staff
-            or cur.max_staff is None
-            or nxt.max_staff is None
-        )
-        if cur.min_staff == nxt.min_staff and max_compat and _end(cur) == _start(nxt):
+        if cur.min_staff == nxt.min_staff and _end(cur) == _start(nxt):
             cur.end_time_local = nxt.end_time_local
-            # keep whichever max_staff is set (prefer non-None)
-            if cur.max_staff is None:
-                cur.max_staff = nxt.max_staff
             nxt.active = False
             sorted_rules.pop(i + 1)
         else:
@@ -464,8 +456,6 @@ def _apply_coverage_changes(db: Session, result: dict, approved_by: int) -> None
                 if req:
                     if "min_staff" in change:
                         req.min_staff = change["min_staff"]
-                    if "max_staff" in change:
-                        req.max_staff = change["max_staff"]
                     if "start_time" in change:
                         req.start_time_local = _parse_time(change["start_time"])
                     if "end_time" in change:

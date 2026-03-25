@@ -51,9 +51,14 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   const h = isNaN(parts[0]) ? 0 : parts[0];
   const m = isNaN(parts[1]) ? 0 : parts[1];
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  // null = not actively editing; string = in-progress user input
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -64,12 +69,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   return (
     <div className={`flex items-center gap-1 ${className ?? ""}`}>
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-14 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -449,54 +455,6 @@ function ManualSchedulingModal({
 }
 
 // ── Clarify Dialog ────────────────────────────────────────────────────
-
-function ClarifyDialog({
-  onConfirm,
-  onCancel,
-  loading,
-}: {
-  onConfirm: (clarification: string) => void;
-  onCancel: () => void;
-  loading: boolean;
-}) {
-  const [text, setText] = useState("");
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-        <div>
-          <h2 className="text-base font-semibold">Request unclear</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your request wasn't specific enough. Please add more detail so we can process it correctly.
-          </p>
-        </div>
-        <textarea
-          className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
-          rows={3}
-          placeholder='e.g. "I need 3 staff in the bakery on Saturday mornings from 7am to 1pm"'
-          value={text}
-          autoFocus
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (text.trim()) onConfirm(text.trim());
-            }
-          }}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => onConfirm(text.trim())} disabled={!text.trim() || loading}>
-            {loading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-            Resubmit
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Coverage Grid (desktop) ───────────────────────────────────────────
 
@@ -978,7 +936,7 @@ export default function SchedulingRules() {
   const [aiSending, setAiSending] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [showClarify, setShowClarify] = useState(false);
+  const [aiUnclear, setAiUnclear] = useState(false);
 
   // AI preview confirmation
   const [aiPreview, setAiPreview] = useState<{
@@ -989,7 +947,6 @@ export default function SchedulingRules() {
     changes: Array<Record<string, unknown>>;
   } | null>(null);
   const [confirmingSend, setConfirmingSend] = useState(false);
-  const [originalText, setOriginalText] = useState("");
 
   // Manual modal
   const [showManualEdit, setShowManualEdit] = useState(false);
@@ -1095,9 +1052,8 @@ export default function SchedulingRules() {
 
     if (intentType === "COVERAGE") {
       const dept = change.department_id != null ? (deptMap.get(change.department_id as number)?.name ?? `Dept ${change.department_id}`) : "store";
-      const staff = change.min_staff != null ? `min ${change.min_staff}` : "";
-      const maxStaff = change.max_staff != null ? ` / max ${change.max_staff}` : "";
-      return `${action} · Coverage · ${dept} · ${day} · ${time}${staff ? ` · ${staff}${maxStaff} staff` : ""}`;
+      const staff = change.min_staff != null ? `${change.min_staff}` : "";
+      return `${action} · Coverage · ${dept} · ${day} · ${time}${staff ? ` · ${staff} staff` : ""}`;
     }
     // ROLE_REQUIREMENT
     const roles: string[] = [];
@@ -1125,11 +1081,10 @@ export default function SchedulingRules() {
         summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
 
       if (isUnclear) {
-        setOriginalText(text.trim());
-        setShowClarify(true);
-        setAiText("");
+        setAiUnclear(true);
       } else {
         const result = res.data.result_json ?? {};
+        setAiUnclear(false);
         setAiPreview({
           outputId: res.data.id,
           summary,
@@ -1164,13 +1119,6 @@ export default function SchedulingRules() {
   };
 
   const handleDiscardPreview = () => setAiPreview(null);
-
-  const handleClarifyConfirm = async (clarification: string) => {
-    const combined = `${originalText}. To clarify: ${clarification}`;
-    setShowClarify(false);
-    setOriginalText("");
-    await handleAiSubmit(combined);
-  };
 
   // Manual modal submit
   const handleManualSubmit = async (rows: ManualRow[], sid: number) => {
@@ -1387,7 +1335,7 @@ export default function SchedulingRules() {
           <div className="flex gap-2">
             <textarea
               value={aiText}
-              onChange={(e) => setAiText(e.target.value)}
+              onChange={(e) => { setAiText(e.target.value); setAiUnclear(false); }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -1412,6 +1360,12 @@ export default function SchedulingRules() {
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
+
+          {aiUnclear && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Instructions unclear — please add more detail or reword your request, then resubmit.
+            </p>
+          )}
 
           {aiPreview && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
@@ -1507,17 +1461,6 @@ export default function SchedulingRules() {
         </Card>
       )}
 
-      {/* Clarify dialog */}
-      {showClarify && (
-        <ClarifyDialog
-          onConfirm={handleClarifyConfirm}
-          onCancel={() => {
-            setShowClarify(false);
-            setOriginalText("");
-          }}
-          loading={aiSending}
-        />
-      )}
     </div>
   );
 }

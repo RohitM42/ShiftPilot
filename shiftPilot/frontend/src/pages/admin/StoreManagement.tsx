@@ -31,9 +31,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   const h = isNaN(parts[0]) ? 0 : parts[0];
   const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -44,12 +48,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   return (
     <div className="flex items-center gap-1.5 mt-1">
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-16 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-16 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>

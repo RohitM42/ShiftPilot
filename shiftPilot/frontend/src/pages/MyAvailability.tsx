@@ -144,9 +144,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   const h = isNaN(parts[0]) ? 9 : parts[0];
   const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -157,12 +161,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   return (
     <div className="flex items-center gap-1">
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-14 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -338,54 +343,6 @@ function ManualEditCard({
 
 // ── Clarification Dialog ─────────────────────────────────────────────
 
-function ClarifyDialog({
-  onConfirm,
-  onCancel,
-  loading,
-}: {
-  onConfirm: (clarification: string) => void;
-  onCancel: () => void;
-  loading: boolean;
-}) {
-  const [text, setText] = useState("");
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-        <div>
-          <h2 className="text-base font-semibold">Request unclear</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your request wasn't specific enough. Please add more detail so we can process it correctly.
-          </p>
-        </div>
-        <textarea
-          className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
-          rows={3}
-          placeholder='e.g. "I meant I cannot work Saturday mornings, from 8am to 1pm"'
-          value={text}
-          autoFocus
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (text.trim()) onConfirm(text.trim());
-            }
-          }}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => onConfirm(text.trim())} disabled={!text.trim() || loading}>
-            {loading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-            Resubmit
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Component ────────────────────────────────────────────────────────
 
 export default function MyAvailability() {
@@ -414,9 +371,7 @@ export default function MyAvailability() {
   } | null>(null);
   const [confirmingSend, setConfirmingSend] = useState(false);
 
-  // Clarification dialog
-  const [showClarify, setShowClarify] = useState(false);
-  const [originalText, setOriginalText] = useState("");
+  const [aiUnclear, setAiUnclear] = useState(false);
 
   const enrichProposals = async (raw: AIProposalResponse[]): Promise<EnrichedProposal[]> => {
     return Promise.all(
@@ -547,9 +502,7 @@ export default function MyAvailability() {
       const isUnclear = summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
 
       if (isUnclear) {
-        setOriginalText(text.trim());
-        setShowClarify(true);
-        setAiText("");
+        setAiUnclear(true);
       } else {
         // Enter preview mode — show the proposed changes before submitting
         const changes = (res.data.result_json?.changes ?? []) as Array<{
@@ -558,6 +511,7 @@ export default function MyAvailability() {
           end_time: string | null;
           rule_type: AvailabilityRuleType;
         }>;
+        setAiUnclear(false);
         setAiPreview({ outputId: res.data.id, summary, changes });
         setShowPending(true);
         setAiText("");
@@ -588,13 +542,6 @@ export default function MyAvailability() {
 
   const handleDiscardPreview = () => {
     setAiPreview(null);
-  };
-
-  const handleClarifyConfirm = async (clarification: string) => {
-    const combined = `${originalText}. To clarify: ${clarification}`;
-    setShowClarify(false);
-    setOriginalText("");
-    await handleAiSubmit(combined);
   };
 
   const handleManualSubmit = async (changes: ManualChangePayload[], summary: string) => {
@@ -722,7 +669,7 @@ export default function MyAvailability() {
           <div className="flex gap-2">
             <textarea
               value={aiText}
-              onChange={(e) => setAiText(e.target.value)}
+              onChange={(e) => { setAiText(e.target.value); setAiUnclear(false); }}
               onKeyDown={handleKeyDown}
               placeholder='e.g. "I cannot work Saturdays anymore" or "I would prefer morning shifts on Wednesdays"'
               rows={2}
@@ -738,6 +685,12 @@ export default function MyAvailability() {
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
+
+          {aiUnclear && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Instructions unclear — please add more detail or reword your request, then resubmit.
+            </p>
+          )}
 
           {aiPreview && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
@@ -827,14 +780,6 @@ export default function MyAvailability() {
         </Card>
       )}
 
-      {/* Clarification dialog */}
-      {showClarify && (
-        <ClarifyDialog
-          onConfirm={handleClarifyConfirm}
-          onCancel={() => { setShowClarify(false); setOriginalText(""); }}
-          loading={aiSending}
-        />
-      )}
     </div>
   );
 }
