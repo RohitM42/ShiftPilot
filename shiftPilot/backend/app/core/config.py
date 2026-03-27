@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
+    # AI API keys
+    GEMINI_API_KEY: str = ""
+    LLM_PROVIDER: str = "gemini"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
