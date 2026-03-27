@@ -31,9 +31,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   const h = isNaN(parts[0]) ? 0 : parts[0];
   const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -44,12 +48,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   return (
     <div className="flex items-center gap-1.5 mt-1">
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-16 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-16 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -63,6 +68,10 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
 }
 
 // ── Constants ─────────────────────────────────────────────────────────
+
+const ALL_SHIFT_HOURS = [4, 5, 6, 7, 8, 9, 10, 11, 12];
+const STANDARD_SHIFT_HOURS = [4, 5, 6, 7, 8, 9];
+const MANAGER_SHIFT_HOURS = [10, 11, 12];
 
 const TIMEZONES = [
   "UTC",
@@ -100,6 +109,7 @@ export default function StoreManagement() {
     timezone: "UTC",
     opening_time: "07:00",
     closing_time: "22:00",
+    allowed_shift_hours: ALL_SHIFT_HOURS,
   });
 
   // Departments
@@ -180,11 +190,12 @@ export default function StoreManagement() {
           // Python serialises time as "HH:MM:SS" — strip seconds for the time input
           opening_time: store.opening_time?.slice(0, 5) ?? "07:00",
           closing_time: store.closing_time?.slice(0, 5) ?? "22:00",
+          allowed_shift_hours: store.allowed_shift_hours ?? ALL_SHIFT_HOURS,
         });
       }
       fetchStoreDepts(selectedStoreId);
     } else if (selectedStoreId === "new") {
-      setDetailsForm({ name: "", location: "", timezone: "UTC", opening_time: "07:00", closing_time: "22:00" });
+      setDetailsForm({ name: "", location: "", timezone: "UTC", opening_time: "07:00", closing_time: "22:00", allowed_shift_hours: ALL_SHIFT_HOURS });
       setStoreDepts([]);
     }
     setExpandedDeptId(null);
@@ -464,12 +475,95 @@ export default function StoreManagement() {
                     />
                   </div>
                 </div>
+                {/* Allowed shift lengths */}
+                <div>
+                  <label className="text-sm font-medium">Allowed Shift Lengths</label>
+                  <p className="text-xs text-muted-foreground mb-2">Controls which shift durations the scheduler can assign</p>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Standard (4–9h)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {STANDARD_SHIFT_HOURS.map((h) => {
+                          const active = detailsForm.allowed_shift_hours.includes(h);
+                          return (
+                            <button
+                              key={h}
+                              type="button"
+                              onClick={() => setDetailsForm((f) => ({
+                                ...f,
+                                allowed_shift_hours: active
+                                  ? f.allowed_shift_hours.filter((x) => x !== h)
+                                  : [...f.allowed_shift_hours, h].sort((a, b) => a - b),
+                              }))}
+                              className={`rounded-md border px-3 py-1 text-xs font-medium transition-colors ${
+                                active
+                                  ? "bg-primary border-primary text-primary-foreground"
+                                  : "border-input text-muted-foreground hover:border-primary hover:text-foreground"
+                              }`}
+                            >
+                              {h}h
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Manager only (10–12h)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {MANAGER_SHIFT_HOURS.map((h) => {
+                          const active = detailsForm.allowed_shift_hours.includes(h);
+                          return (
+                            <button
+                              key={h}
+                              type="button"
+                              onClick={() => setDetailsForm((f) => ({
+                                ...f,
+                                allowed_shift_hours: active
+                                  ? f.allowed_shift_hours.filter((x) => x !== h)
+                                  : [...f.allowed_shift_hours, h].sort((a, b) => a - b),
+                              }))}
+                              className={`rounded-md border px-3 py-1 text-xs font-medium transition-colors ${
+                                active
+                                  ? "bg-primary border-primary text-primary-foreground"
+                                  : "border-input text-muted-foreground hover:border-primary hover:text-foreground"
+                              }`}
+                            >
+                              {h}h
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDetailsForm((f) => ({ ...f, allowed_shift_hours: ALL_SHIFT_HOURS }))}
+                        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
+                      >
+                        Select all
+                      </button>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      <button
+                        type="button"
+                        onClick={() => setDetailsForm((f) => ({ ...f, allowed_shift_hours: [] }))}
+                        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
+                      >
+                        Clear all
+                      </button>
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {detailsForm.allowed_shift_hours.length} of {ALL_SHIFT_HOURS.length} selected
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 <Button
                   onClick={handleSaveDetails}
                   disabled={
                     saving ||
                     !detailsForm.name.trim() ||
-                    !detailsForm.location.trim()
+                    !detailsForm.location.trim() ||
+                    detailsForm.allowed_shift_hours.length === 0
                   }
                 >
                   {saving

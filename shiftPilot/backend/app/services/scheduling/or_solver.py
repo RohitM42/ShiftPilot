@@ -17,7 +17,7 @@ Constraint Priority (via weights):
 
 Hard constraints:
 - One shift per day per employee
-- 12-hour rest between consecutive days (within week)
+- 11-hour rest between consecutive days (within week)
 - Max 6 working days in any 7-day rolling window (UK Working Time Regulations), cross-week aware
 """
 
@@ -54,7 +54,7 @@ SLOTS_PER_DAY = (DAY_END_HOUR - DAY_START_HOUR) * SLOTS_PER_HOUR
 MIN_SHIFT_HOURS = 4
 MAX_REGULAR_HOURS = 9
 MAX_MANAGER_HOURS = 12
-MIN_REST_HOURS = 12
+MIN_REST_HOURS = 11
 MAX_CONSECUTIVE_DAYS = 6  # UK Working Time Regulations: at most 6 working days in any 7-day window
 
 # Soft constraint weights (negative = penalty, positive = bonus)
@@ -85,13 +85,16 @@ def time_to_slot(t: time, day_start_hour: int = DAY_START_HOUR) -> int:
     return (total_minutes - start_minutes) // SLOT_DURATION_MINUTES
 
 
-def get_valid_shift_lengths(is_manager: bool) -> list[int]:
-    """Get valid shift lengths in slots for employee type."""
+def get_valid_shift_lengths(is_manager: bool, allowed_hours: list[int] | None = None) -> list[int]:
+    """Get valid shift lengths in slots for employee type, filtered by store-configured allowed hours."""
     max_hours = MAX_MANAGER_HOURS if is_manager else MAX_REGULAR_HOURS
     min_slots = MIN_SHIFT_HOURS * SLOTS_PER_HOUR
     max_slots = max_hours * SLOTS_PER_HOUR
-    # Only allow shifts starting on the hour (2 slots for 30-min granularity) for now, may change later 
-    return list(range(min_slots, max_slots + 1, SLOTS_PER_HOUR))
+    all_lengths = list(range(min_slots, max_slots + 1, SLOTS_PER_HOUR))
+    if not allowed_hours:
+        return all_lengths
+    allowed_slots = set(h * SLOTS_PER_HOUR for h in allowed_hours)
+    return [l for l in all_lengths if l in allowed_slots]
 
 
 def _get_shift_length_bonus(length_slots: int) -> int:
@@ -206,7 +209,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
     shift_vars = {}
     
     for emp in employees:
-        valid_lengths = get_valid_shift_lengths(emp.is_manager)
+        valid_lengths = get_valid_shift_lengths(emp.is_manager, context.allowed_shift_hours)
         avail = availability[emp.id]
         
         for day in range(7):
@@ -268,7 +271,7 @@ def solve_schedule(context: ScheduleContext) -> ScheduleResult:
                 else:
                     works_var[emp.id][day] = 0  # no valid shifts available this day
 
-    # 2. 12-hour rest between consecutive days
+    # 2. 11-hour rest between consecutive days
     for emp in employees:
         for day in range(6):
             today_shifts = get_emp_day_shifts(emp.id, day)

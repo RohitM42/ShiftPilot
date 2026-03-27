@@ -12,8 +12,12 @@ import {
   LogOut,
   Store,
   UserCog,
+  Sun,
+  Moon,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -25,6 +29,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const { user, logout, isManagerOrAdmin, isAdmin, highestRole } = useAuth();
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="flex h-screen">
@@ -51,6 +56,13 @@ export function Layout() {
             <Clock size={18} />
             My Availability
           </NavLink>
+
+          {!isManagerOrAdmin && (
+            <NavLink to="/store-schedule" className={navLinkClass}>
+              <CalendarDays size={18} />
+              Store Schedule
+            </NavLink>
+          )}
 
           {isManagerOrAdmin && (
             <>
@@ -111,6 +123,15 @@ export function Layout() {
             variant="ghost"
             size="sm"
             className="w-full justify-start gap-3 text-muted-foreground"
+            onClick={toggle}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-3 text-muted-foreground"
             onClick={logout}
           >
             <LogOut size={18} />
@@ -121,7 +142,7 @@ export function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl p-6">
+        <div className="mx-auto max-w-[1600px] p-4">
           <Outlet />
         </div>
       </main>

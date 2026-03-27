@@ -4,7 +4,7 @@ Determines if an employee can work a given time slot.
 """
 
 from datetime import datetime, date, time, timedelta
-from typing import Optional
+from typing import Optional, List
 
 from .types import (
     Employee,
@@ -158,6 +158,69 @@ def can_employee_work_shift(
             return False, "Conflicts with existing shift"
     
     return True, "OK"
+
+
+def check_min_rest(
+    employee_id: int,
+    new_start: datetime,
+    new_end: datetime,
+    existing_shifts: List[Shift],
+    min_rest_hours: int = 11,
+) -> List[str]:
+    """
+    Check WTR 11-hour minimum daily rest between shifts.
+    Returns a list of violation messages (empty = compliant).
+    existing_shifts should already exclude the shift being updated (if any).
+    """
+    violations = []
+    for s in existing_shifts:
+        if s.employee_id != employee_id:
+            continue
+        if s.end_datetime <= new_start:
+            rest_hours = (new_start - s.end_datetime).total_seconds() / 3600
+            if rest_hours < min_rest_hours:
+                violations.append(
+                    f"Only {rest_hours:.1f}h rest after shift ending "
+                    f"{s.end_datetime.strftime('%H:%M on %a %d %b')}"
+                )
+        elif s.start_datetime >= new_end:
+            rest_hours = (s.start_datetime - new_end).total_seconds() / 3600
+            if rest_hours < min_rest_hours:
+                violations.append(
+                    f"Only {rest_hours:.1f}h rest before shift starting "
+                    f"{s.start_datetime.strftime('%H:%M on %a %d %b')}"
+                )
+    return violations
+
+
+def check_rolling_window(
+    employee_id: int,
+    new_date: date,
+    existing_shifts: List[Shift],
+    max_days: int = 6,
+) -> List[str]:
+    """
+    Check WTR max 6 working days in any 7-day rolling window.
+    Returns a list of violation messages (empty = compliant).
+    existing_shifts should already exclude the shift being updated (if any).
+    """
+    emp_dates = {
+        s.start_datetime.date()
+        for s in existing_shifts
+        if s.employee_id == employee_id
+    }
+
+    for days_back in range(7):
+        window_start = new_date - timedelta(days=days_back)
+        window_end = window_start + timedelta(days=6)
+        days_in_window = sum(1 for d in emp_dates if window_start <= d <= window_end) + 1  # +1 for new_date
+        if days_in_window > max_days:
+            return [
+                f"Would work {days_in_window} days in the 7-day window "
+                f"{window_start.strftime('%d %b')}–{window_end.strftime('%d %b')} "
+                f"(WTR max {max_days})"
+            ]
+    return []
 
 
 def get_available_employees_for_slot(

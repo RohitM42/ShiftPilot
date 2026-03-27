@@ -1,5 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime, Time, func
+from sqlalchemy import Column, Integer, String, DateTime, Time, func, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from datetime import datetime, time
+from typing import List
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.database import Base
 
@@ -12,5 +14,6 @@ class Stores(Base):
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
     opening_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(7, 0))
     closing_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(22, 0))
+    allowed_shift_hours: Mapped[List[int]] = mapped_column(ARRAY(Integer), nullable=False, server_default=text("'{4,5,6,7,8,9,10,11,12}'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

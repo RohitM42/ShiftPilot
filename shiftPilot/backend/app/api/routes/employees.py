@@ -2,8 +2,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin
-from app.db.models.employees import Employees
+from app.api.deps import get_db, get_current_user, require_manager_or_admin, require_admin, get_accessible_store_ids
+from app.db.models.employees import Employees, EmploymentStatus
 from app.db.models.users import Users
 from app.db.models.stores import Stores
 from app.schemas.employees import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeWithUserResponse
@@ -53,8 +53,40 @@ def list_employees(
     )
     if store_id:
         query = query.filter(Employees.store_id == store_id)
+    else:
+        # Scope to accessible stores; get_accessible_store_ids returns None for global admins (no restriction)
+        accessible = get_accessible_store_ids(db, current_user)
+        if accessible is not None:
+            query = query.filter(Employees.store_id.in_(accessible))
 
     results = query.offset(skip).limit(limit).all()
+
+    return [
+        EmployeeWithUserResponse(
+            **{c.key: getattr(emp, c.key) for c in Employees.__table__.columns},
+            firstname=firstname,
+            surname=surname,
+            email=email,
+        )
+        for emp, firstname, surname, email in results
+    ]
+
+
+@router.get("/store-colleagues", response_model=List[EmployeeWithUserResponse])
+def list_store_colleagues(
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    employee = db.query(Employees).filter(Employees.user_id == current_user.id).first()
+    if not employee:
+        raise HTTPException(status_code=403, detail="No employee record found")
+
+    results = (
+        db.query(Employees, Users.firstname, Users.surname, Users.email)
+        .join(Users, Employees.user_id == Users.id)
+        .filter(Employees.store_id == employee.store_id, Employees.employment_status == EmploymentStatus.ACTIVE)
+        .all()
+    )
 
     return [
         EmployeeWithUserResponse(

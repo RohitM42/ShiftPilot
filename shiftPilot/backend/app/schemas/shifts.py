@@ -34,3 +34,8 @@ class ShiftResponse(ShiftBase):
 
     class Config:
         from_attributes = True
+
+
+class ShiftWithViolationsResponse(ShiftResponse):
+    """ShiftResponse extended with WTR compliance warnings (non-blocking)."""
+    violations: list[str] = []

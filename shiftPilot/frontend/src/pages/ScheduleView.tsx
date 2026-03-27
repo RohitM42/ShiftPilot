@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays, isToday, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,15 +20,21 @@ import {
   storesApi,
   employeeDepartmentsApi,
   scheduleApi,
+  coverageApi,
+  roleRequirementsApi,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { PageLoader } from "@/components/PageLoader";
 import type {
   ShiftResponse,
+  ShiftWithViolationsResponse,
   EmployeeWithUserResponse,
   Department,
   Store,
   EmployeeDepartmentResponse,
   GenerateScheduleResponse,
+  CoverageRequirementResponse,
+  RoleRequirementResponse,
 } from "@/types";
 import { ShiftStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -119,7 +125,8 @@ function GeneratePanel({
         store_id: storeId,
         start_date: weekStart.toISOString(),
         end_date: weekEnd.toISOString(),
-        limit: 500,
+        exclude_cancelled: true,
+        limit: 2000,
       })
       .then((r) => {
         const all = r.data as ShiftResponse[];
@@ -348,6 +355,10 @@ function GeneratePanel({
   );
 }
 
+// ── Shared styles ─────────────────────────────────────────────────────
+
+const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+
 // ── Shared time input ─────────────────────────────────────────────────
 
 function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -355,9 +366,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   const h = isNaN(parts[0]) ? 0 : parts[0];
   const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -368,9 +383,13 @@ function SplitTimeInput({ value, onChange }: { value: string; onChange: (v: stri
   return (
     <div className="flex items-center gap-1">
       <input
-        type="number" min={0} max={23} value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-14 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -392,10 +411,11 @@ interface ManualRow {
   startTime: string; // "HH:MM"
   endTime: string;   // "HH:MM"
   departmentId: string;
+  status: "DRAFT" | "PUBLISHED";
 }
 
 function makeRow(id: number, defaultDay: string): ManualRow {
-  return { id, employeeId: "", day: defaultDay, startTime: "09:00", endTime: "17:00", departmentId: "" };
+  return { id, employeeId: "", day: defaultDay, startTime: "09:00", endTime: "17:00", departmentId: "", status: "PUBLISHED" };
 }
 
 function ManualShiftPanel({
@@ -424,11 +444,13 @@ function ManualShiftPanel({
   const [rows, setRows] = useState<ManualRow[]>([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
   const [submitting, setSubmitting] = useState(false);
   const [nextId, setNextId] = useState(2);
+  const [submitViolations, setSubmitViolations] = useState<{ label: string; messages: string[] }[]>([]);
 
   // Reset rows with current date whenever panel opens or closes
   useEffect(() => {
     setRows([makeRow(1, format(selectedDate, "yyyy-MM-dd"))]);
     setNextId(2);
+    setSubmitViolations([]);
     if (!expanded) onPreviewChange([]);
   }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -463,7 +485,7 @@ function ManualShiftPanel({
     onPreviewChange(previews);
   }, [rows, deptMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function submit(shiftStatus: "DRAFT" | "PUBLISHED") {
+  async function submit() {
     if (!storeId) return;
     const complete = rows.filter(
       (r) => r.employeeId && r.day && r.startTime && r.endTime && r.departmentId
@@ -472,27 +494,39 @@ function ManualShiftPanel({
 
     setSubmitting(true);
     try {
-      await Promise.all(
-        complete.map((r) =>
-          shiftsApi.create({
+      const results = await Promise.all(
+        complete.map(async (r) => {
+          const res = await shiftsApi.create({
             store_id: storeId,
             employee_id: Number(r.employeeId),
             department_id: Number(r.departmentId),
             start_datetime_utc: new Date(`${r.day}T${r.startTime}:00`).toISOString(),
             end_datetime_utc: new Date(`${r.day}T${r.endTime}:00`).toISOString(),
-            status: shiftStatus,
+            status: r.status,
             source: "MANUAL",
-          })
-        )
+          });
+          return { row: r, data: res.data as ShiftWithViolationsResponse };
+        })
       );
       onShiftsChanged();
-      onToggle(); // collapse panel (effect above will clear rows + preview)
+      const withViolations = results.filter((r) => r.data.violations.length > 0);
+      if (withViolations.length > 0) {
+        setSubmitViolations(
+          withViolations.map((r) => {
+            const emp = employees.find((e) => e.id === Number(r.row.employeeId));
+            return {
+              label: emp ? `${emp.firstname} ${emp.surname} on ${r.row.day}` : r.row.day,
+              messages: r.data.violations,
+            };
+          })
+        );
+      } else {
+        onToggle();
+      }
     } finally {
       setSubmitting(false);
     }
   }
-
-  const selectClass = "rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
 
   // Week days for the day selector
   const weekDays = useMemo(() => {
@@ -530,25 +564,49 @@ function ManualShiftPanel({
           <div className="space-y-2">
             {rows.map((row) => {
               const empDeptIds = row.employeeId ? (empDepts.get(Number(row.employeeId)) ?? []) : [];
-              const availableDepts = departments.filter((d) => empDeptIds.includes(d.id));
+              const availableDepts = row.employeeId
+                ? departments.filter((d) => empDeptIds.includes(d.id))
+                : departments;
+
+              const availableEmployees = row.departmentId
+                ? employees.filter((e) => (empDepts.get(e.id) ?? []).includes(Number(row.departmentId)))
+                : employees;
 
               return (
                 <div key={row.id} className="flex flex-wrap items-center gap-2 rounded-md border bg-background/50 px-3 py-2">
-                  {/* Employee */}
+                  {/* Department — scoped to employee's depts if employee selected */}
+                  <select
+                    className={selectClass}
+                    value={row.departmentId}
+                    onChange={(e) => {
+                      const deptId = e.target.value;
+                      const empStillValid = row.employeeId && (empDepts.get(Number(row.employeeId)) ?? []).includes(Number(deptId));
+                      updateRow(row.id, { departmentId: deptId, employeeId: empStillValid ? row.employeeId : "" });
+                    }}
+                  >
+                    <option value="">Department…</option>
+                    {availableDepts.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+
+                  {/* Employee — scoped to department's employees if department selected */}
                   <select
                     className={selectClass}
                     value={row.employeeId}
                     onChange={(e) => {
                       const empId = e.target.value;
+                      const newEmpDeptIds = empId ? (empDepts.get(Number(empId)) ?? []) : [];
+                      const deptStillValid = row.departmentId && newEmpDeptIds.includes(Number(row.departmentId));
                       const primaryDeptId = empId ? empPrimaryDepts.get(Number(empId)) : undefined;
                       updateRow(row.id, {
                         employeeId: empId,
-                        departmentId: primaryDeptId ? String(primaryDeptId) : "",
+                        departmentId: deptStillValid ? row.departmentId : (primaryDeptId ? String(primaryDeptId) : ""),
                       });
                     }}
                   >
                     <option value="">Employee…</option>
-                    {employees.map((e) => (
+                    {availableEmployees.map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.firstname} {e.surname}
                       </option>
@@ -571,18 +629,23 @@ function ManualShiftPanel({
                   <span className="text-xs text-muted-foreground">to</span>
                   <SplitTimeInput value={row.endTime} onChange={(v) => updateRow(row.id, { endTime: v })} />
 
-                  {/* Department — filtered to employee's depts */}
-                  <select
-                    className={selectClass}
-                    value={row.departmentId}
-                    onChange={(e) => updateRow(row.id, { departmentId: e.target.value })}
-                    disabled={!row.employeeId}
+                  {/* Draft / Published toggle */}
+                  <button
+                    onClick={() => updateRow(row.id, { status: row.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED" })}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+                      row.status === "PUBLISHED" ? "bg-primary" : "bg-muted-foreground/30"
+                    )}
+                    title={row.status === "PUBLISHED" ? "Published — click to set Draft" : "Draft — click to set Published"}
                   >
-                    <option value="">Department…</option>
-                    {availableDepts.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
+                    <span className={cn(
+                      "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                      row.status === "PUBLISHED" ? "translate-x-5" : "translate-x-0"
+                    )} />
+                  </button>
+                  <span className="text-xs text-muted-foreground w-16">
+                    {row.status === "PUBLISHED" ? "Published" : "Draft"}
+                  </span>
 
                   <Button
                     variant="ghost"
@@ -598,6 +661,33 @@ function ManualShiftPanel({
             })}
           </div>
 
+          {submitViolations.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-900">
+                Shifts saved — Working Time Regulation warnings:
+              </p>
+              {submitViolations.map((v, i) => (
+                <div key={i}>
+                  <p className="text-xs font-medium text-amber-800">{v.label}</p>
+                  <ul className="ml-2 space-y-0.5">
+                    {v.messages.map((m, j) => (
+                      <li key={j} className="text-xs text-amber-700">• {m}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => { setSubmitViolations([]); onToggle(); }}
+              >
+                <Check size={12} />
+                Dismiss
+              </Button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <Button variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
               <Plus size={13} />
@@ -608,19 +698,11 @@ function ManualShiftPanel({
                 Cancel
               </Button>
               <Button
-                variant="outline"
                 size="sm"
                 disabled={submitting || completeCount === 0}
-                onClick={() => submit("DRAFT")}
+                onClick={() => submit()}
               >
-                Save as Draft ({completeCount})
-              </Button>
-              <Button
-                size="sm"
-                disabled={submitting || completeCount === 0}
-                onClick={() => submit("PUBLISHED")}
-              >
-                Publish ({completeCount})
+                Save ({completeCount})
               </Button>
             </div>
           </div>
@@ -737,6 +819,53 @@ function UnmetRulesPanel({
   );
 }
 
+// ── Constraint status panel ───────────────────────────────────────────
+
+interface ConstraintViolation {
+  type: "coverage" | "role";
+  label: string;
+  detail: string;
+}
+
+function ConstraintStatusPanel({ violations }: { violations: ConstraintViolation[] }) {
+  if (violations.length === 0) return null;
+
+  const coverageViolations = violations.filter((v) => v.type === "coverage");
+  const roleViolations = violations.filter((v) => v.type === "role");
+
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
+      <h2 className="text-sm font-semibold text-amber-900">Unmet Constraints for This Day</h2>
+
+      {coverageViolations.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-amber-800 mb-1">Coverage</p>
+          <ul className="space-y-1">
+            {coverageViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-800">
+                {v.label} · {v.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {roleViolations.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-amber-800 mb-1">Role Requirements</p>
+          <ul className="space-y-1">
+            {roleViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-800">
+                {v.label} · {v.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────
 
 export default function ScheduleView() {
@@ -760,6 +889,10 @@ export default function ScheduleView() {
   const [empPrimaryDepts, setEmpPrimaryDepts] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
 
+  // Constraint rules
+  const [coverageRules, setCoverageRules] = useState<CoverageRequirementResponse[]>([]);
+  const [roleRules, setRoleRules] = useState<RoleRequirementResponse[]>([]);
+
   // Generate state
   const [generateExpanded, setGenerateExpanded] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -770,9 +903,75 @@ export default function ScheduleView() {
   const [manualExpanded, setManualExpanded] = useState(false);
   const [previewShifts, setPreviewShifts] = useState<PreviewShift[]>([]);
 
+  // Edit shift state
+  const [editingShift, setEditingShift] = useState<ParsedShift | null>(null);
+  const [editForm, setEditForm] = useState<{
+    employeeId: string;
+    day: string;
+    startTime: string;
+    endTime: string;
+    departmentId: string;
+    status: string;
+  } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editViolations, setEditViolations] = useState<string[]>([]);
+
   // Delete confirmation
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Reset edit form whenever editing target changes
+  useEffect(() => {
+    if (!editingShift) {
+      setEditForm(null);
+      setEditViolations([]);
+      return;
+    }
+    setEditForm({
+      employeeId: String(editingShift.employeeId),
+      day: format(editingShift.start, "yyyy-MM-dd"),
+      startTime: format(editingShift.start, "HH:mm"),
+      endTime: format(editingShift.end, "HH:mm"),
+      departmentId: String(editingShift.departmentId),
+      status: editingShift.status,
+    });
+    setEditViolations([]);
+  }, [editingShift?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleEditSave() {
+    if (!editingShift || !editForm || !resolvedStoreId) return;
+    setEditSaving(true);
+    setEditViolations([]);
+    try {
+      const res = await shiftsApi.update(editingShift.id, {
+        department_id: Number(editForm.departmentId),
+        start_datetime_utc: new Date(`${editForm.day}T${editForm.startTime}:00`).toISOString(),
+        end_datetime_utc: new Date(`${editForm.day}T${editForm.endTime}:00`).toISOString(),
+        status: editForm.status,
+      });
+      const data = res.data as ShiftWithViolationsResponse;
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      const r = await shiftsApi.list({
+        store_id: resolvedStoreId,
+        start_date: dayStart.toISOString(),
+        end_date: dayEnd.toISOString(),
+        limit: 500,
+      });
+      setShifts(r.data);
+      if (data.violations.length > 0) {
+        setEditViolations(data.violations);
+      } else {
+        setEditingShift(null);
+      }
+    } catch {
+      // keep form open on error
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function confirmDelete() {
     if (!pendingDeleteId || !resolvedStoreId) return;
@@ -836,6 +1035,13 @@ export default function ScheduleView() {
       setEmpDepts(map);
       setEmpPrimaryDepts(primaryMap);
     });
+  }, [resolvedStoreId]);
+
+  // Load constraint rules when store is resolved
+  useEffect(() => {
+    if (!resolvedStoreId) return;
+    coverageApi.list({ store_id: resolvedStoreId }).then((r) => setCoverageRules(r.data));
+    roleRequirementsApi.list({ store_id: resolvedStoreId }).then((r) => setRoleRules(r.data));
   }, [resolvedStoreId]);
 
   // Load shifts for selected day
@@ -903,6 +1109,90 @@ export default function ScheduleView() {
       });
   }, [shifts, showDrafts, deptMap]);
 
+  // Constraint violations for the selected day
+  const constraintViolations = useMemo((): ConstraintViolation[] => {
+    const violations: ConstraintViolation[] = [];
+    const todayDow = (selectedDate.getDay() + 6) % 7; // JS Sun=0 → model Mon=0
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    const empMap = new Map(employees.map((e) => [e.id, e]));
+
+    const toMins = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const overlaps = (shiftStart: Date, shiftEnd: Date, ruleStart: string, ruleEnd: string) => {
+      const rS = toMins(ruleStart);
+      const rE = toMins(ruleEnd);
+      const sS = shiftStart.getHours() * 60 + shiftStart.getMinutes();
+      const sE = shiftEnd.getHours() * 60 + shiftEnd.getMinutes();
+      return sS < rE && sE > rS;
+    };
+
+    // Coverage
+    for (const rule of coverageRules) {
+      if (!rule.active) continue;
+      if (rule.day_of_week !== todayDow) continue;
+      if (!rule.start_time_local || !rule.end_time_local) continue;
+
+      const staffOnShift = parsedShifts.filter(
+        (s) =>
+          s.departmentId === rule.department_id &&
+          format(s.start, "yyyy-MM-dd") === dateStr &&
+          overlaps(s.start, s.end, rule.start_time_local!, rule.end_time_local!)
+      ).length;
+
+      if (staffOnShift < rule.min_staff) {
+        const deptName = deptMap.get(rule.department_id) ?? `Dept ${rule.department_id}`;
+        violations.push({
+          type: "coverage",
+          label: `${deptName} · ${rule.start_time_local.slice(0, 5)}–${rule.end_time_local.slice(0, 5)}`,
+          detail: `needs ${rule.min_staff} staff, ${staffOnShift} scheduled`,
+        });
+      }
+    }
+
+    // Role requirements
+    for (const rule of roleRules) {
+      if (!rule.active) continue;
+      if (rule.day_of_week !== null && rule.day_of_week !== todayDow) continue;
+
+      const scopedShifts = parsedShifts.filter((s) => {
+        if (format(s.start, "yyyy-MM-dd") !== dateStr) return false;
+        if (rule.department_id !== null && s.departmentId !== rule.department_id) return false;
+        return overlaps(s.start, s.end, rule.start_time_local, rule.end_time_local);
+      });
+
+      const deptName = rule.department_id ? deptMap.get(rule.department_id) : null;
+      const scope = deptName ? `${deptName} · ` : "";
+      const timeRange = `${rule.start_time_local.slice(0, 5)}–${rule.end_time_local.slice(0, 5)}`;
+
+      if (rule.requires_manager) {
+        const managerCount = scopedShifts.filter((s) => empMap.get(s.employeeId)?.is_manager).length;
+        if (managerCount < rule.min_manager_count) {
+          violations.push({
+            type: "role",
+            label: `${scope}${timeRange}`,
+            detail: `≥${rule.min_manager_count} manager required, ${managerCount} on shift`,
+          });
+        }
+      }
+
+      if (rule.requires_keyholder) {
+        const hasKeyholder = scopedShifts.some((s) => empMap.get(s.employeeId)?.is_keyholder);
+        if (!hasKeyholder) {
+          violations.push({
+            type: "role",
+            label: `${scope}${timeRange}`,
+            detail: "keyholder required, none on shift",
+          });
+        }
+      }
+    }
+
+    return violations;
+  }, [parsedShifts, coverageRules, roleRules, selectedDate, deptMap, employees]);
+
   // Shifts grouped by employee
   const shiftsByEmployee = useMemo(() => {
     const m = new Map<number, ParsedShift[]>();
@@ -937,6 +1227,105 @@ export default function ScheduleView() {
   const goToday = () => setSelectedDate(new Date());
 
   const dateLabel = format(selectedDate, "EEEE, d MMMM yyyy");
+
+  const weekDays = useMemo(
+    () =>
+      Array.from({ length: 7 }, (_, i) => {
+        const d = addDays(weekMonday, i);
+        return { value: format(d, "yyyy-MM-dd"), label: format(d, "EEE d MMM") };
+      }),
+    [weekMonday]
+  );
+
+  // Build the inline edit form rendered inside the gantt row
+  const editFormContent = editingShift && editForm ? (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          className={selectClass}
+          value={editForm.day}
+          onChange={(e) => setEditForm({ ...editForm, day: e.target.value })}
+        >
+          {weekDays.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+
+        <SplitTimeInput value={editForm.startTime} onChange={(v) => setEditForm({ ...editForm, startTime: v })} />
+        <span className="text-xs text-muted-foreground">to</span>
+        <SplitTimeInput value={editForm.endTime} onChange={(v) => setEditForm({ ...editForm, endTime: v })} />
+
+        <select
+          className={selectClass}
+          value={editForm.departmentId}
+          onChange={(e) => setEditForm({ ...editForm, departmentId: e.target.value })}
+        >
+          {(empDepts.get(Number(editForm.employeeId)) ?? []).map((deptId) => {
+            const dept = departments.find((d) => d.id === deptId);
+            return dept ? <option key={dept.id} value={dept.id}>{dept.name}</option> : null;
+          })}
+        </select>
+
+        {/* Draft / Published toggle */}
+        <button
+          onClick={() =>
+            setEditForm({
+              ...editForm,
+              status: editForm.status === "PUBLISHED" ? "DRAFT" : "PUBLISHED",
+            })
+          }
+          className={cn(
+            "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none",
+            editForm.status === "PUBLISHED" ? "bg-primary" : "bg-muted-foreground/30"
+          )}
+          title={editForm.status === "PUBLISHED" ? "Published — click to set Draft" : "Draft — click to set Published"}
+        >
+          <span
+            className={cn(
+              "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+              editForm.status === "PUBLISHED" ? "translate-x-5" : "translate-x-0"
+            )}
+          />
+        </button>
+        <span className="text-xs text-muted-foreground">
+          {editForm.status === "PUBLISHED" ? "Published" : "Draft"}
+        </span>
+
+        <div className="flex gap-2 ml-auto">
+          <Button variant="outline" size="sm" onClick={() => setEditingShift(null)}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={editSaving} onClick={handleEditSave}>
+            {editSaving ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </div>
+
+      {editViolations.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 space-y-1">
+          <p className="text-xs font-semibold text-amber-800">
+            Saved — Working Time Regulation warnings:
+          </p>
+          <ul className="space-y-0.5">
+            {editViolations.map((v, i) => (
+              <li key={i} className="text-xs text-amber-700">• {v}</li>
+            ))}
+          </ul>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 mt-1"
+            onClick={() => setEditingShift(null)}
+          >
+            <Check size={12} />
+            Dismiss
+          </Button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">
@@ -993,49 +1382,68 @@ export default function ScheduleView() {
         </div>
       </div>
 
-      {/* Week day tabs */}
-      <div className="flex items-center gap-1 flex-wrap">
-        <Button variant="outline" size="icon" onClick={prevWeek}>
-          <ChevronLeft size={16} />
-        </Button>
+      {/* Week day tabs + constraint status card */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-1 flex-wrap">
+          <Button variant="outline" size="icon" onClick={prevWeek}>
+            <ChevronLeft size={16} />
+          </Button>
 
-        {Array.from({ length: 7 }, (_, i) => {
-          const date = addDays(weekMonday, i);
-          const isSelected =
-            format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
-          const todayDate = isToday(date);
-          return (
-            <button
-              key={i}
-              onClick={() => setSelectedDate(date)}
-              className={`w-16 rounded-md border py-1.5 text-center text-sm transition-colors ${
-                isSelected
-                  ? "border-primary bg-primary/10 text-primary font-medium"
-                  : todayDate
-                  ? "border-primary/40 bg-primary/5 text-foreground hover:bg-primary/10"
-                  : "hover:bg-accent text-muted-foreground"
-              }`}
-            >
-              <span className="block text-xs font-semibold">
-                {format(date, "EEE").toUpperCase()}
+          {Array.from({ length: 7 }, (_, i) => {
+            const date = addDays(weekMonday, i);
+            const isSelected =
+              format(date, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+            const todayDate = isToday(date);
+            return (
+              <button
+                key={i}
+                onClick={() => setSelectedDate(date)}
+                className={`w-16 rounded-md border py-1.5 text-center text-sm transition-colors ${
+                  isSelected
+                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    : todayDate
+                    ? "border-primary/40 bg-primary/5 text-foreground hover:bg-primary/10"
+                    : "hover:bg-accent text-muted-foreground"
+                }`}
+              >
+                <span className="block text-xs font-semibold">
+                  {format(date, "EEE").toUpperCase()}
+                </span>
+                <span className="block text-xs">{format(date, "d MMM")}</span>
+              </button>
+            );
+          })}
+
+          <Button variant="outline" size="icon" onClick={nextWeek}>
+            <ChevronRight size={16} />
+          </Button>
+
+          <Button
+            variant={isToday(selectedDate) ? "default" : "outline"}
+            size="sm"
+            className="text-xs ml-1"
+            onClick={goToday}
+          >
+            Today
+          </Button>
+        </div>
+
+        {/* Constraint status card */}
+        {(resolvedStoreId || !isAdmin) && !loading && (
+          constraintViolations.length === 0 ? (
+            <div className="rounded-lg border bg-card px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+              <Check size={12} className="text-green-500 shrink-0" />
+              All constraints met
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-xs text-amber-700 shrink-0">
+              <span className="rounded-full bg-amber-200 border border-amber-400 px-2 py-0.5 font-semibold">
+                {constraintViolations.length}
               </span>
-              <span className="block text-xs">{format(date, "d MMM")}</span>
-            </button>
-          );
-        })}
-
-        <Button variant="outline" size="icon" onClick={nextWeek}>
-          <ChevronRight size={16} />
-        </Button>
-
-        <Button
-          variant={isToday(selectedDate) ? "default" : "outline"}
-          size="sm"
-          className="text-xs ml-1"
-          onClick={goToday}
-        >
-          Today
-        </Button>
+              unmet constraints · see below
+            </div>
+          )
+        )}
       </div>
 
       {/* Delete confirmation dialog */}
@@ -1083,6 +1491,10 @@ export default function ScheduleView() {
               )}
               activeDeptId={selectedDeptId}
               onDeleteShift={setPendingDeleteId}
+              onEditShift={(shift) => setEditingShift((prev) => prev?.id === shift.id ? null : shift)}
+              editingShiftId={editingShift?.id}
+              editingEmployeeId={editingShift?.employeeId}
+              editFormContent={editFormContent}
             />
           )}
 
@@ -1134,7 +1546,7 @@ export default function ScheduleView() {
             employees={employees}
             empDepts={empDepts}
             empPrimaryDepts={empPrimaryDepts}
-            departments={departments}
+            departments={storeDepts}
             selectedDate={selectedDate}
             expanded={manualExpanded}
             onToggle={() => setManualExpanded((v) => !v)}
@@ -1155,7 +1567,7 @@ export default function ScheduleView() {
             onPreviewChange={setPreviewShifts}
           />
 
-          {/* Unmet rules */}
+          {/* Unmet rules from last generation */}
           {generateResult && (
             <UnmetRulesPanel
               result={generateResult}
@@ -1163,6 +1575,9 @@ export default function ScheduleView() {
               deptMap={deptMap}
             />
           )}
+
+          {/* Constraint violations for selected day */}
+          {!loading && <ConstraintStatusPanel violations={constraintViolations} />}
         </>
       )}
     </div>

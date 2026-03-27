@@ -260,6 +260,7 @@ def load_schedule_context(db: Session, store_id: int, week_start: date) -> Sched
     store = db.query(Stores).filter(Stores.id == store_id).first()
     day_start_hour = store.opening_time.hour if store and store.opening_time else 6
     day_end_hour = store.closing_time.hour if store and store.closing_time else 22
+    allowed_shift_hours = store.allowed_shift_hours if store and store.allowed_shift_hours else [4, 5, 6, 7, 8, 9, 10, 11, 12]
 
     return ScheduleContext(
         store_id=store_id,
@@ -273,4 +274,5 @@ def load_schedule_context(db: Session, store_id: int, week_start: date) -> Sched
         previous_week_shifts=load_previous_week_shifts(db, store_id, week_start),
         day_start_hour=day_start_hour,
         day_end_hour=day_end_hour,
+        allowed_shift_hours=allowed_shift_hours,
     )

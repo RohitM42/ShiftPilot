@@ -37,6 +37,37 @@
     --preferred: 213 60% 90%;
     --preferred-border: 213 60% 65%;
   }
+
+  /* dark mode tokens */
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 14%;
+    --card-foreground: 210 40% 98%;
+    --primary: 213 80% 63%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 18%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 22%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 33% 22%;
+    --input: 217 33% 22%;
+    --ring: 213 80% 60%;
+    --success: 142 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --available: 142 40% 20%;
+    --available-border: 142 50% 40%;
+    --unavailable: 0 40% 20%;
+    --unavailable-border: 0 50% 40%;
+    --preferred: 213 40% 20%;
+    --preferred-border: 213 50% 40%;
+  }
 }
 
 @layer base {

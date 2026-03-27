@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import React from "react";
+import { Trash2, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { EmployeeWithUserResponse } from "@/types";
 import { ShiftStatus } from "@/types";
@@ -50,12 +51,20 @@ export function EmployeeGantt({
   previewShifts = [],
   activeDeptId,
   onDeleteShift,
+  onEditShift,
+  editingShiftId,
+  editingEmployeeId,
+  editFormContent,
 }: {
   employees: EmployeeWithUserResponse[];
   shiftsByEmployee: Map<number, ParsedShift[]>;
   previewShifts?: PreviewShift[];
   activeDeptId?: number | null;
   onDeleteShift?: (shiftId: number) => void;
+  onEditShift?: (shift: ParsedShift) => void;
+  editingShiftId?: number | null;
+  editingEmployeeId?: number | null;
+  editFormContent?: React.ReactNode;
 }) {
   const [hoveredShiftId, setHoveredShiftId] = useState<number | null>(null);
   const sortedEmployees = [...employees].sort((a, b) => {
@@ -102,8 +111,8 @@ export function EmployeeGantt({
           const hasShifts = empShifts.length > 0;
 
           return (
+            <React.Fragment key={emp.id}>
             <div
-              key={emp.id}
               className={cn(
                 "flex border-t border-border/80",
                 hasShifts ? "min-h-[3.5rem]" : "min-h-[1.75rem]"
@@ -197,14 +206,35 @@ export function EmployeeGantt({
                         </span>
                       </span>
 
-                      {isHovered && onDeleteShift ? (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onDeleteShift(shift.id); }}
-                          className="self-stretch flex items-center px-2 hover:bg-destructive text-destructive hover:text-white transition-colors shrink-0"
-                          title="Delete shift"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                      {isHovered && (onDeleteShift || onEditShift) ? (
+                        <div className="flex self-stretch shrink-0">
+                          {onEditShift && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onEditShift(shift); }}
+                              className={cn(
+                                "flex items-center px-1.5 transition-colors",
+                                isOffDept
+                                  ? "hover:bg-slate-200 text-slate-500"
+                                  : isDraft
+                                  ? "hover:bg-primary/30 text-primary"
+                                  : "hover:bg-white/20 text-primary-foreground",
+                                editingShiftId === shift.id && "opacity-60"
+                              )}
+                              title="Edit shift"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                          )}
+                          {onDeleteShift && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onDeleteShift(shift.id); }}
+                              className="flex items-center px-1.5 hover:bg-destructive text-destructive hover:text-white transition-colors"
+                              title="Delete shift"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <span
                           className={cn(
@@ -243,6 +273,12 @@ export function EmployeeGantt({
                 })}
               </div>
             </div>
+            {editingEmployeeId === emp.id && editFormContent && (
+              <div className="border-t bg-muted/30 px-4 py-3">
+                {editFormContent}
+              </div>
+            )}
+            </React.Fragment>
           );
         })}
       </div>

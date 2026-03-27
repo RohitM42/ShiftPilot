@@ -7,6 +7,7 @@ import { shiftsApi, employeesApi, departmentsApi, scheduleApi } from "@/services
 import type { ShiftResponse, EmployeeWithUserResponse, Department, GenerateScheduleResponse } from "@/types";
 import { ShiftStatus } from "@/types";
 import { EmployeeGantt, type ParsedShift } from "@/components/EmployeeGantt";
+import { PageLoader } from "@/components/PageLoader";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -73,7 +74,8 @@ export default function ScheduleSummaryView() {
         store_id: storeId,
         start_date: start.toISOString(),
         end_date: end.toISOString(),
-        limit: 500,
+        exclude_cancelled: true,
+        limit: 2000,
       }),
       employeesApi.list(storeId),
       departmentsApi.list(),
@@ -186,6 +188,8 @@ export default function ScheduleSummaryView() {
     : "";
 
   if (!state) return null;
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

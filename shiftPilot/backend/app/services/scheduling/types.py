@@ -118,6 +118,7 @@ class ScheduleContext:
     previous_week_shifts: list[Shift] = field(default_factory=list)  # published shifts from prior week for cross-week consecutive days constraint
     day_start_hour: int = 6   # store opening hour — controls valid shift window
     day_end_hour: int = 22    # store closing hour
+    allowed_shift_hours: list[int] = field(default_factory=lambda: [4, 5, 6, 7, 8, 9, 10, 11, 12])
 
     @property
     def week_end(self) -> date:

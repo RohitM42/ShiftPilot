@@ -267,6 +267,7 @@ export interface StoreResponse {
   id: number;
   name: string;
   location: string;
+  allowed_shift_hours: number[];
   timezone: string;
   opening_time: string; // "HH:MM:SS" from Python time
   closing_time: string;
@@ -277,6 +278,12 @@ export interface StoreResponse {
 export interface StoreDepartmentResponse {
   store_id: number;
   department_id: number;
+}
+
+// Shift with WTR violations (create/update response)
+
+export interface ShiftWithViolationsResponse extends ShiftResponse {
+  violations: string[];
 }
 
 // Schedule generation

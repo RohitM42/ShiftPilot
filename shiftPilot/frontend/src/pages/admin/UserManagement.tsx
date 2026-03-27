@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { usersApi, userRolesApi, storesApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import type { UserResponse, UserRoleResponse, StoreResponse } from "@/types";
 import { Role } from "@/types";
 
@@ -571,6 +572,8 @@ export default function UserManagement() {
   };
 
   const isOpen = panelMode !== null;
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-4">

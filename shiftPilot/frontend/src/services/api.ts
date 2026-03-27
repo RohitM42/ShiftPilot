@@ -134,6 +134,7 @@ export const roleRequirementsApi = {
 export const employeesApi = {
   list: (storeId?: number) =>
     api.get("/employees", { params: storeId ? { store_id: storeId } : {} }),
+  listStoreColleagues: () => api.get("/employees/store-colleagues"),
   get: (id: number) => api.get(`/employees/${id}`),
   create: (data: {
     user_id: number;
@@ -150,6 +151,8 @@ export const employeesApi = {
 export const shiftsApi = {
   list: (params?: Record<string, unknown>) =>
     api.get("/shifts", { params }),
+  listStoreSchedule: (params?: Record<string, unknown>) =>
+    api.get("/shifts/store-schedule", { params }),
   create: (payload: {
     store_id: number;
     department_id: number;
@@ -159,6 +162,13 @@ export const shiftsApi = {
     status: string;
     source: string;
   }) => api.post("/shifts", payload),
+  update: (shiftId: number, payload: {
+    department_id?: number;
+    employee_id?: number;
+    start_datetime_utc?: string;
+    end_datetime_utc?: string;
+    status?: string;
+  }) => api.put(`/shifts/${shiftId}`, payload),
   delete: (shiftId: number) => api.delete(`/shifts/${shiftId}`),
 };
 

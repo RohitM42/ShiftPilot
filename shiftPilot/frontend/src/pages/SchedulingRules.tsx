@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi } from "@/services/api";
+import { aiInputsApi, aiProposalsApi, coverageApi, roleRequirementsApi, departmentsApi, storesApi, employeesApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { ProposalType, ProposalStatus } from "@/types";
@@ -51,9 +52,14 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   const h = isNaN(parts[0]) ? 0 : parts[0];
   const m = isNaN(parts[1]) ? 0 : parts[1];
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  // null = not actively editing; string = in-progress user input
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -64,12 +70,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   return (
     <div className={`flex items-center gap-1 ${className ?? ""}`}>
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-14 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -130,10 +137,20 @@ function computeAggregateIntervals(rules: CoverageRequirementResponse[]): Aggreg
   return merged;
 }
 
-function coverageIntensityClass(staff: number): string {
-  if (staff >= 4) return "bg-blue-400 border-blue-500 text-blue-900";
-  if (staff === 3) return "bg-blue-300 border-blue-400 text-blue-900";
-  if (staff === 2) return "bg-blue-200 border-blue-300 text-blue-800";
+function getCoverageThresholds(total: number): [number, number, number] {
+  if (total <= 0) return [1, 2, 3];
+  return [
+    Math.max(1, Math.round(total * 0.10)),
+    Math.max(2, Math.round(total * 0.25)),
+    Math.max(3, Math.round(total * 0.40)),
+  ];
+}
+
+function coverageIntensityClass(staff: number, total: number): string {
+  const [t1, t2, t3] = getCoverageThresholds(total);
+  if (staff > t3) return "bg-blue-400 border-blue-500 text-blue-900";
+  if (staff > t2) return "bg-blue-300 border-blue-400 text-blue-900";
+  if (staff > t1) return "bg-blue-200 border-blue-300 text-blue-800";
   return "bg-blue-100 border-blue-200 text-blue-700";
 }
 
@@ -440,54 +457,6 @@ function ManualSchedulingModal({
 
 // ── Clarify Dialog ────────────────────────────────────────────────────
 
-function ClarifyDialog({
-  onConfirm,
-  onCancel,
-  loading,
-}: {
-  onConfirm: (clarification: string) => void;
-  onCancel: () => void;
-  loading: boolean;
-}) {
-  const [text, setText] = useState("");
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-        <div>
-          <h2 className="text-base font-semibold">Request unclear</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your request wasn't specific enough. Please add more detail so we can process it correctly.
-          </p>
-        </div>
-        <textarea
-          className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
-          rows={3}
-          placeholder='e.g. "I need 3 staff in the bakery on Saturday mornings from 7am to 1pm"'
-          value={text}
-          autoFocus
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (text.trim()) onConfirm(text.trim());
-            }
-          }}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => onConfirm(text.trim())} disabled={!text.trim() || loading}>
-            {loading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-            Resubmit
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Coverage Grid (desktop) ───────────────────────────────────────────
 
 function CoverageGrid({
@@ -496,12 +465,14 @@ function CoverageGrid({
   deptMap,
   expandedDays,
   onToggleExpand,
+  totalEmployees,
 }: {
   coverageRules: CoverageRequirementResponse[];
   deptFilter: number | null;
   deptMap: Map<number, Department>;
   expandedDays: Set<number>;
   onToggleExpand: (day: number) => void;
+  totalEmployees: number;
 }) {
   const activeRules = useMemo(() => coverageRules.filter((r) => r.active), [coverageRules]);
 
@@ -561,7 +532,7 @@ function CoverageGrid({
                         key={i}
                         className={cn(
                           "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
-                          coverageIntensityClass(interval.totalStaff)
+                          coverageIntensityClass(interval.totalStaff, totalEmployees)
                         )}
                         style={{ left: `${left}%`, width: `${width}%` }}
                         title={`${interval.totalStaff} staff required (aggregate)`}
@@ -655,17 +626,27 @@ function CoverageGrid({
       </div>
 
       {/* Heatmap legend (aggregate mode only) */}
-      {deptFilter == null && (
-        <div className="flex flex-wrap items-center gap-4 text-xs px-4 py-2 border-t">
-          {[1, 2, 3, 4].map((n) => (
-            <div key={n} className="flex items-center gap-1.5">
-              <div className={cn("w-4 h-3 rounded-sm border", coverageIntensityClass(n))} />
-              <span className="text-muted-foreground">{n === 4 ? "4+" : n} staff</span>
-            </div>
-          ))}
-          <span className="text-muted-foreground ml-1">· Click a day to expand by department</span>
-        </div>
-      )}
+      {deptFilter == null && (() => {
+        const [t1, t2, t3] = getCoverageThresholds(totalEmployees);
+        const bandLabel = (lo: number, hi: number) => lo === hi ? `${lo}` : `${lo}–${hi}`;
+        const bands: [number, string][] = [
+          [1,      bandLabel(1, t1)],
+          [t1 + 1, bandLabel(t1 + 1, t2)],
+          [t2 + 1, bandLabel(t2 + 1, t3)],
+          [t3 + 1, `${t3 + 1}+`],
+        ];
+        return (
+          <div className="flex flex-wrap items-center gap-4 text-xs px-4 py-2 border-t">
+            {bands.map(([rep, label]) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <div className={cn("w-4 h-3 rounded-sm border", coverageIntensityClass(rep, totalEmployees))} />
+                <span className="text-muted-foreground">{label} staff</span>
+              </div>
+            ))}
+            <span className="text-muted-foreground ml-1">· Click a day to expand by department</span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -755,11 +736,19 @@ function RoleGrid({
     const blockClass = roleBlockClass(rule.requires_manager, rule.requires_keyholder);
     const deptName = rule.department_id != null ? (deptMap.get(rule.department_id)?.name ?? `Dept ${rule.department_id}`) : null;
 
+    const both = rule.requires_manager && rule.requires_keyholder;
+    const verticalClass = both
+      ? "top-1.5 bottom-1.5"
+      : rule.requires_manager
+      ? "top-1.5 bottom-[52%]"
+      : "top-[52%] bottom-1.5";
+
     return (
       <div
         key={rule.id}
         className={cn(
-          "absolute top-1.5 bottom-1.5 rounded-md border flex items-center px-2 overflow-hidden",
+          "absolute rounded-md border flex items-center px-2 overflow-hidden",
+          verticalClass,
           blockClass
         )}
         style={{ left: `${left}%`, width: `${width}%` }}
@@ -832,10 +821,6 @@ function RoleGrid({
         <div className="flex items-center gap-1.5">
           <div className="w-4 h-3 rounded-sm bg-amber-100 border border-amber-300" />
           <span className="text-muted-foreground">Keyholder</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-4 h-3 rounded-sm bg-indigo-100 border border-indigo-300" />
-          <span className="text-muted-foreground">Manager + Keyholder</span>
         </div>
       </div>
     </div>
@@ -941,6 +926,7 @@ export default function SchedulingRules() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [proposals, setProposals] = useState<EnrichedProposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalEmployees, setTotalEmployees] = useState(0);
 
   const [activeTab, setActiveTab] = useState<"coverage" | "role">("coverage");
   const [deptFilter, setDeptFilter] = useState<number | null>(null);
@@ -951,7 +937,7 @@ export default function SchedulingRules() {
   const [aiSending, setAiSending] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [showClarify, setShowClarify] = useState(false);
+  const [aiUnclear, setAiUnclear] = useState(false);
 
   // AI preview confirmation
   const [aiPreview, setAiPreview] = useState<{
@@ -962,7 +948,6 @@ export default function SchedulingRules() {
     changes: Array<Record<string, unknown>>;
   } | null>(null);
   const [confirmingSend, setConfirmingSend] = useState(false);
-  const [originalText, setOriginalText] = useState("");
 
   // Manual modal
   const [showManualEdit, setShowManualEdit] = useState(false);
@@ -1012,14 +997,16 @@ export default function SchedulingRules() {
   const load = async () => {
     setLoading(true);
     try {
-      const [coverageRes, roleRes, deptsRes] = await Promise.all([
+      const [coverageRes, roleRes, deptsRes, empRes] = await Promise.all([
         coverageApi.list(storeId != null ? { store_id: storeId } : {}),
         roleRequirementsApi.list(storeId != null ? { store_id: storeId } : {}),
         departmentsApi.list(),
+        employeesApi.list(storeId ?? undefined),
       ]);
       setCoverageRules(coverageRes.data);
       setRoleRules(roleRes.data);
       setDepartments(deptsRes.data);
+      setTotalEmployees(empRes.data.length);
 
       const proposalsRes = storeId != null
         ? await aiProposalsApi.getByStore(storeId).catch(() => ({ data: [] }))
@@ -1066,9 +1053,8 @@ export default function SchedulingRules() {
 
     if (intentType === "COVERAGE") {
       const dept = change.department_id != null ? (deptMap.get(change.department_id as number)?.name ?? `Dept ${change.department_id}`) : "store";
-      const staff = change.min_staff != null ? `min ${change.min_staff}` : "";
-      const maxStaff = change.max_staff != null ? ` / max ${change.max_staff}` : "";
-      return `${action} · Coverage · ${dept} · ${day} · ${time}${staff ? ` · ${staff}${maxStaff} staff` : ""}`;
+      const staff = change.min_staff != null ? `${change.min_staff}` : "";
+      return `${action} · Coverage · ${dept} · ${day} · ${time}${staff ? ` · ${staff} staff` : ""}`;
     }
     // ROLE_REQUIREMENT
     const roles: string[] = [];
@@ -1096,11 +1082,10 @@ export default function SchedulingRules() {
         summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
 
       if (isUnclear) {
-        setOriginalText(text.trim());
-        setShowClarify(true);
-        setAiText("");
+        setAiUnclear(true);
       } else {
         const result = res.data.result_json ?? {};
+        setAiUnclear(false);
         setAiPreview({
           outputId: res.data.id,
           summary,
@@ -1135,13 +1120,6 @@ export default function SchedulingRules() {
   };
 
   const handleDiscardPreview = () => setAiPreview(null);
-
-  const handleClarifyConfirm = async (clarification: string) => {
-    const combined = `${originalText}. To clarify: ${clarification}`;
-    setShowClarify(false);
-    setOriginalText("");
-    await handleAiSubmit(combined);
-  };
 
   // Manual modal submit
   const handleManualSubmit = async (rows: ManualRow[], sid: number) => {
@@ -1209,6 +1187,8 @@ export default function SchedulingRules() {
     }
   };
 
+  if (loading) return <PageLoader />;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1232,19 +1212,21 @@ export default function SchedulingRules() {
               ))}
             </select>
           )}
-          {/* Department filter */}
-          <select
-            className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
-            value={deptFilter ?? ""}
-            onChange={(e) => handleDeptFilter(e.target.value === "" ? null : parseInt(e.target.value))}
-          >
-            <option value="">All departments</option>
-            {relevantDepts.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          {/* Department filter — coverage tab only */}
+          {activeTab === "coverage" && (
+            <select
+              className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+              value={deptFilter ?? ""}
+              onChange={(e) => handleDeptFilter(e.target.value === "" ? null : parseInt(e.target.value))}
+            >
+              <option value="">All departments</option>
+              {relevantDepts.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          )}
           <Button
             variant={showManualEdit ? "secondary" : "outline"}
             size="sm"
@@ -1269,7 +1251,7 @@ export default function SchedulingRules() {
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setDeptFilter(null); }}
           >
             {tab === "coverage" ? "Coverage Requirements" : "Role Requirements"}
           </button>
@@ -1307,6 +1289,7 @@ export default function SchedulingRules() {
                     deptMap={deptMap}
                     expandedDays={expandedDays}
                     onToggleExpand={toggleExpand}
+                    totalEmployees={totalEmployees}
                   />
                   <CompactCoverageView
                     coverageRules={coverageRules}
@@ -1355,7 +1338,7 @@ export default function SchedulingRules() {
           <div className="flex gap-2">
             <textarea
               value={aiText}
-              onChange={(e) => setAiText(e.target.value)}
+              onChange={(e) => { setAiText(e.target.value); setAiUnclear(false); }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -1380,6 +1363,12 @@ export default function SchedulingRules() {
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
+
+          {aiUnclear && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Instructions unclear — please add more detail or reword your request, then resubmit.
+            </p>
+          )}
 
           {aiPreview && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
@@ -1475,17 +1464,6 @@ export default function SchedulingRules() {
         </Card>
       )}
 
-      {/* Clarify dialog */}
-      {showClarify && (
-        <ClarifyDialog
-          onConfirm={handleClarifyConfirm}
-          onCancel={() => {
-            setShowClarify(false);
-            setOriginalText("");
-          }}
-          loading={aiSending}
-        />
-      )}
     </div>
   );
 }

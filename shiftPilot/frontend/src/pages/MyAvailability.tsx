@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { meApi, aiInputsApi, aiProposalsApi } from "@/services/api";
+import { PageLoader } from "@/components/PageLoader";
 import api from "@/services/api";
 import { cn } from "@/lib/utils";
 import { AvailabilityRuleType, ProposalType, ProposalStatus } from "@/types";
@@ -21,9 +22,9 @@ const DAY_LABELS_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 const RULE_STYLES = {
   [AvailabilityRuleType.AVAILABLE]: {
-    bg: "bg-gray-100",
-    border: "border-gray-300",
-    text: "text-gray-600",
+    bg: "bg-gray-100 dark:bg-slate-700",
+    border: "border-gray-300 dark:border-slate-500",
+    text: "text-gray-600 dark:text-slate-300",
     label: "Available",
   },
   [AvailabilityRuleType.PREFERRED]: {
@@ -55,7 +56,7 @@ function formatHourLabel(hour: number): string {
 }
 
 function formatRuleTime(timeStr: string | null): string {
-  if (!timeStr) return "";
+  if (!timeStr) return "00:00";
   const [h, m] = timeStr.split(":").map(Number);
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 }
@@ -144,9 +145,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   const h = isNaN(parts[0]) ? 9 : parts[0];
   const m = isNaN(parts[1]) ? 0 : [0, 15, 30, 45].reduce((a, b) => (Math.abs(b - parts[1]) < Math.abs(a - parts[1]) ? b : a));
 
-  const setH = (raw: string) => {
-    const n = parseInt(raw);
+  const [hourDraft, setHourDraft] = useState<string | null>(null);
+  const displayH = hourDraft !== null ? hourDraft : h.toString();
+
+  const commitHour = (raw: string) => {
+    const n = parseInt(raw, 10);
     const clamped = isNaN(n) ? 0 : Math.max(0, Math.min(23, n));
+    setHourDraft(null);
     onChange(`${clamped.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
   };
   const setM = (raw: string) => {
@@ -157,12 +162,13 @@ function SplitTimeInput({ value, onChange, className }: { value: string; onChang
   return (
     <div className="flex items-center gap-1">
       <input
-        type="number"
-        min={0}
-        max={23}
-        value={h}
-        onChange={(e) => setH(e.target.value)}
-        className={`${base} w-14 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+        type="text"
+        inputMode="numeric"
+        value={displayH}
+        onFocus={() => setHourDraft(h.toString())}
+        onChange={(e) => setHourDraft(e.target.value.replace(/\D/g, "").slice(0, 2))}
+        onBlur={() => commitHour(displayH)}
+        className={`${base} w-14 text-center`}
         placeholder="HH"
       />
       <span className="text-muted-foreground text-sm font-medium">:</span>
@@ -338,54 +344,6 @@ function ManualEditCard({
 
 // ── Clarification Dialog ─────────────────────────────────────────────
 
-function ClarifyDialog({
-  onConfirm,
-  onCancel,
-  loading,
-}: {
-  onConfirm: (clarification: string) => void;
-  onCancel: () => void;
-  loading: boolean;
-}) {
-  const [text, setText] = useState("");
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-        <div>
-          <h2 className="text-base font-semibold">Request unclear</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Your request wasn't specific enough. Please add more detail so we can process it correctly.
-          </p>
-        </div>
-        <textarea
-          className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
-          rows={3}
-          placeholder='e.g. "I meant I cannot work Saturday mornings, from 8am to 1pm"'
-          value={text}
-          autoFocus
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (text.trim()) onConfirm(text.trim());
-            }
-          }}
-        />
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={loading}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => onConfirm(text.trim())} disabled={!text.trim() || loading}>
-            {loading ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-            Resubmit
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Component ────────────────────────────────────────────────────────
 
 export default function MyAvailability() {
@@ -414,9 +372,7 @@ export default function MyAvailability() {
   } | null>(null);
   const [confirmingSend, setConfirmingSend] = useState(false);
 
-  // Clarification dialog
-  const [showClarify, setShowClarify] = useState(false);
-  const [originalText, setOriginalText] = useState("");
+  const [aiUnclear, setAiUnclear] = useState(false);
 
   const enrichProposals = async (raw: AIProposalResponse[]): Promise<EnrichedProposal[]> => {
     return Promise.all(
@@ -500,10 +456,16 @@ export default function MyAvailability() {
   const pendingOverlayRules = useMemo<PendingOverlayRule[]>(() => {
     const result: PendingOverlayRule[] = [];
 
+    const parseEndHour = (t: string | null | undefined): number => {
+      if (!t) return 24;
+      const h = timeToHours(t);
+      return h === 0 ? 24 : h; // "00:00" means midnight = end of day
+    };
+
     if (showManualEdit) {
       for (const c of formChanges) {
         const startH = c.all_day ? 0 : timeToHours(c.start_time ?? "00:00");
-        const endH = c.all_day ? 24 : timeToHours(c.end_time ?? "24:00");
+        const endH = c.all_day ? 24 : parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
       }
     }
@@ -513,7 +475,7 @@ export default function MyAvailability() {
       if (!p.pending_changes) continue;
       for (const c of p.pending_changes) {
         const startH = c.start_time ? timeToHours(c.start_time) : 0;
-        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        const endH = parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: false });
       }
     }
@@ -521,7 +483,7 @@ export default function MyAvailability() {
     if (aiPreview) {
       for (const c of aiPreview.changes) {
         const startH = c.start_time ? timeToHours(c.start_time) : 0;
-        const endH = c.end_time ? timeToHours(c.end_time) : 24;
+        const endH = parseEndHour(c.end_time);
         result.push({ dayOfWeek: c.day_of_week, startHour: startH, endHour: endH, ruleType: c.rule_type, isPreview: true });
       }
     }
@@ -541,9 +503,7 @@ export default function MyAvailability() {
       const isUnclear = summary.toLowerCase().includes("unclear") || res.data.status === "INVALID";
 
       if (isUnclear) {
-        setOriginalText(text.trim());
-        setShowClarify(true);
-        setAiText("");
+        setAiUnclear(true);
       } else {
         // Enter preview mode — show the proposed changes before submitting
         const changes = (res.data.result_json?.changes ?? []) as Array<{
@@ -552,6 +512,7 @@ export default function MyAvailability() {
           end_time: string | null;
           rule_type: AvailabilityRuleType;
         }>;
+        setAiUnclear(false);
         setAiPreview({ outputId: res.data.id, summary, changes });
         setShowPending(true);
         setAiText("");
@@ -582,13 +543,6 @@ export default function MyAvailability() {
 
   const handleDiscardPreview = () => {
     setAiPreview(null);
-  };
-
-  const handleClarifyConfirm = async (clarification: string) => {
-    const combined = `${originalText}. To clarify: ${clarification}`;
-    setShowClarify(false);
-    setOriginalText("");
-    await handleAiSubmit(combined);
   };
 
   const handleManualSubmit = async (changes: ManualChangePayload[], summary: string) => {
@@ -625,6 +579,8 @@ export default function MyAvailability() {
       handleAiSubmit(aiText);
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">
@@ -716,7 +672,7 @@ export default function MyAvailability() {
           <div className="flex gap-2">
             <textarea
               value={aiText}
-              onChange={(e) => setAiText(e.target.value)}
+              onChange={(e) => { setAiText(e.target.value); setAiUnclear(false); }}
               onKeyDown={handleKeyDown}
               placeholder='e.g. "I cannot work Saturdays anymore" or "I would prefer morning shifts on Wednesdays"'
               rows={2}
@@ -732,6 +688,12 @@ export default function MyAvailability() {
               {aiSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </Button>
           </div>
+
+          {aiUnclear && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Instructions unclear — please add more detail or reword your request, then resubmit.
+            </p>
+          )}
 
           {aiPreview && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 space-y-3">
@@ -821,14 +783,6 @@ export default function MyAvailability() {
         </Card>
       )}
 
-      {/* Clarification dialog */}
-      {showClarify && (
-        <ClarifyDialog
-          onConfirm={handleClarifyConfirm}
-          onCancel={() => { setShowClarify(false); setOriginalText(""); }}
-          loading={aiSending}
-        />
-      )}
     </div>
   );
 }
@@ -897,8 +851,8 @@ function AvailabilityGrid({ rulesByDay, pendingRules }: { rulesByDay: Map<number
                   return (
                     <>
                       {blockingRules.length === 0 && (
-                        <div className="absolute top-1.5 bottom-1.5 left-0 right-0 rounded-md bg-gray-100 border border-gray-300 flex items-center justify-center">
-                          <span className="text-xs font-semibold text-gray-600">All day available</span>
+                        <div className="absolute top-1.5 bottom-1.5 left-0 right-0 rounded-md bg-gray-100 dark:bg-slate-700 border border-gray-300 dark:border-slate-500 flex items-center justify-center">
+                          <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">All day available</span>
                         </div>
                       )}
                       {availRegions.map((seg, i) => {
@@ -1002,8 +956,8 @@ function CompactAvailability({ rulesByDay, pendingRules }: { rulesByDay: Map<num
               const blockingRules = dayRules.filter(r => r.ruleType !== AvailabilityRuleType.AVAILABLE);
               if (blockingRules.length === 0) {
                 return (
-                  <div className="rounded-md bg-gray-100 border border-gray-300 px-3 py-2">
-                    <span className="text-xs font-semibold text-gray-600">All day available</span>
+                  <div className="rounded-md bg-gray-100 dark:bg-slate-700 border border-gray-300 dark:border-slate-500 px-3 py-2">
+                    <span className="text-xs font-semibold text-gray-600 dark:text-slate-300">All day available</span>
                   </div>
                 );
               }
@@ -1020,7 +974,7 @@ function CompactAvailability({ rulesByDay, pendingRules }: { rulesByDay: Map<num
                       return (
                         <div key={`avail-${i}`} className={cn("w-full rounded-md border px-3 py-2 flex items-center justify-between", RULE_STYLES[AvailabilityRuleType.AVAILABLE].border, RULE_STYLES[AvailabilityRuleType.AVAILABLE].bg)}>
                           <span className={cn("text-xs font-semibold", RULE_STYLES[AvailabilityRuleType.AVAILABLE].text)}>{label}</span>
-                          <Badge className="text-[10px] bg-gray-100 text-gray-600 border-gray-300">Available</Badge>
+                          <Badge className="text-[10px] bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300 border-gray-300 dark:border-slate-500">Available</Badge>
                         </div>
                       );
                     }
