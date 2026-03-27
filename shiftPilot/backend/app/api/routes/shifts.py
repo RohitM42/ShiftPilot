@@ -29,7 +29,10 @@ def create_shift(
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
 
-    department = db.query(Departments).filter(Departments.id == payload.department_id).first()
+    department = db.query(Departments).filter(
+        Departments.id == payload.department_id,
+        Departments.active == True
+    ).first()
     if not department:
         raise HTTPException(status_code=404, detail="Department not found")
 

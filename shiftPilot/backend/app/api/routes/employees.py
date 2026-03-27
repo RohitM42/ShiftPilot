@@ -6,7 +6,7 @@ from app.api.deps import get_db, get_current_user, require_manager_or_admin, req
 from app.db.models.employees import Employees
 from app.db.models.users import Users
 from app.db.models.stores import Stores
-from app.schemas.employees import EmployeeCreate, EmployeeUpdate, EmployeeResponse
+from app.schemas.employees import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeWithUserResponse
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -39,7 +39,7 @@ def create_employee(
     return employee
 
 
-@router.get("", response_model=List[EmployeeResponse])
+@router.get("", response_model=List[EmployeeWithUserResponse])
 def list_employees(
     store_id: int = None,
     skip: int = 0,
@@ -47,22 +47,46 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user: Users = Depends(require_manager_or_admin),
 ):
-    query = db.query(Employees)
+    # Join with users table to include name/email in response
+    query = db.query(Employees, Users.firstname, Users.surname, Users.email).join(
+        Users, Employees.user_id == Users.id
+    )
     if store_id:
         query = query.filter(Employees.store_id == store_id)
-    return query.offset(skip).limit(limit).all()
+
+    results = query.offset(skip).limit(limit).all()
+
+    return [
+        EmployeeWithUserResponse(
+            **{c.key: getattr(emp, c.key) for c in Employees.__table__.columns},
+            firstname=firstname,
+            surname=surname,
+            email=email,
+        )
+        for emp, firstname, surname, email in results
+    ]
 
 
-@router.get("/{employee_id}", response_model=EmployeeResponse)
+@router.get("/{employee_id}", response_model=EmployeeWithUserResponse)
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
     current_user: Users = Depends(require_manager_or_admin),
 ):
-    employee = db.query(Employees).filter(Employees.id == employee_id).first()
-    if not employee:
+    # Join with users table to include name/email in response
+    result = db.query(Employees, Users.firstname, Users.surname, Users.email).join(
+        Users, Employees.user_id == Users.id
+    ).filter(Employees.id == employee_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
+
+    emp, firstname, surname, email = result
+    return EmployeeWithUserResponse(
+        **{c.key: getattr(emp, c.key) for c in Employees.__table__.columns},
+        firstname=firstname,
+        surname=surname,
+        email=email,
+    )
 
 
 @router.put("/{employee_id}", response_model=EmployeeResponse)

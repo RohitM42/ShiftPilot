@@ -38,9 +38,13 @@ def load_employee_context(db: Session, user_id: int) -> Optional[dict]:
 
     departments = []
     for d in dept_rows:
-        dept = db.query(Departments).filter(Departments.id == d.department_id).first()
-        if dept:
-            departments.append({
+        dept = db.query(Departments).filter(
+            Departments.id == d.department_id,
+            Departments.active == True
+        ).first()
+        if not dept:
+            continue
+        departments.append({
                 "department_id": dept.id,
                 "name": dept.name,
                 "is_primary": d.is_primary,
@@ -85,9 +89,13 @@ def load_store_context(db: Session, store_id: int) -> Optional[dict]:
 
     departments = []
     for sd in store_depts:
-        dept = db.query(Departments).filter(Departments.id == sd.department_id).first()
-        if dept:
-            departments.append({"department_id": dept.id, "name": dept.name})
+        dept = db.query(Departments).filter(
+            Departments.id == sd.department_id,
+            Departments.active == True
+        ).first()
+        if not dept:
+            continue
+        departments.append({"department_id": dept.id, "name": dept.name})
 
     return {
         "store_id": store.id,

@@ -1,6 +1,6 @@
 """
 Constraint checking utilities for schedule validation.
-Handles coverage requirements, role requirements, and contracted hours. ***budget constraint to be added***
+Handles coverage requirements, role requirements, and contracted hours.
 """
 
 from datetime import datetime, date, time, timedelta

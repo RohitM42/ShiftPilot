@@ -14,7 +14,7 @@ from app.db.models.time_off_requests import TimeOffRequests
 from app.db.models.employee_departments import EmployeeDepartments
 from app.db.models.ai_inputs import AIInputs
 from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
-from app.db.models.ai_proposals import AIProposals, ProposalStatus
+from app.db.models.ai_proposals import AIProposals, ProposalStatus, ProposalSource
 from app.schemas.shifts import ShiftResponse
 from app.schemas.availability_rules import AvailabilityRuleResponse
 from app.schemas.time_off_requests import TimeOffRequestResponse
@@ -23,8 +23,18 @@ from app.schemas.employees import EmployeeResponse
 from app.schemas.ai_inputs import AIInputResponse
 from app.schemas.ai_outputs import AIOutputResponse
 from app.schemas.ai_proposals import AIProposalResponse
+from app.schemas.user_roles import UserRoleResponse
+from app.db.models.user_roles import UserRoles
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+@router.get("/roles", response_model=List[UserRoleResponse])
+def get_my_roles(
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    """Get current user's roles"""
+    return db.query(UserRoles).filter(UserRoles.user_id == current_user.id).all()
 
 
 @router.get("/employee", response_model=EmployeeResponse)
@@ -149,15 +159,30 @@ def get_my_ai_proposals(
     my_input_ids = db.query(AIInputs.id).filter(
         AIInputs.req_by_user_id == current_user.id
     ).subquery()
-    
+
     my_output_ids = db.query(AIOutputs.id).filter(
-        (AIOutputs.affects_user_id == current_user.id) | 
+        (AIOutputs.affects_user_id == current_user.id) |
         (AIOutputs.input_id.in_(my_input_ids))
     ).subquery()
-    
-    query = db.query(AIProposals).filter(AIProposals.ai_output_id.in_(my_output_ids))
-    
+
+    # Get employee record to match manual proposals by employee_id in changes_json
+    employee = db.query(Employees).filter(Employees.user_id == current_user.id).first()
+
+    # AI proposals linked via output OR manual proposals created for this employee
+    from sqlalchemy import cast, Integer
+    from sqlalchemy.dialects.postgresql import JSONB
+    if employee:
+        query = db.query(AIProposals).filter(
+            (AIProposals.ai_output_id.in_(my_output_ids)) |
+            (
+                (AIProposals.source == ProposalSource.MANUAL) &
+                (AIProposals.changes_json["employee_id"].astext.cast(Integer) == employee.id)
+            )
+        )
+    else:
+        query = db.query(AIProposals).filter(AIProposals.ai_output_id.in_(my_output_ids))
+
     if status_filter:
         query = query.filter(AIProposals.status == status_filter)
-    
+
     return query.order_by(AIProposals.created_at.desc()).offset(skip).limit(limit).all()

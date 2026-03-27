@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, time
 from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 
+from app.db.models.stores import Stores
 from app.db.models.employees import Employees, EmploymentStatus
 from app.db.models.employee_departments import EmployeeDepartments
 from app.db.models.availability_rules import AvailabilityRules, AvailabilityRuleType
@@ -180,15 +181,15 @@ def load_role_requirements(db: Session, store_id: int) -> list[RoleRequirement]:
 
 
 def load_existing_shifts(
-    db: Session, 
-    store_id: int, 
+    db: Session,
+    store_id: int,
     week_start: date
 ) -> list[Shift]:
     """Load existing non-cancelled shifts for the week (for conflict detection)."""
-    
+
     week_start_dt = datetime.combine(week_start, time.min)
     week_end_dt = datetime.combine(week_start + timedelta(days=7), time.min)
-    
+
     stmt = select(Shifts).where(
         and_(
             Shifts.store_id == store_id,
@@ -198,7 +199,39 @@ def load_existing_shifts(
         )
     )
     rows = db.execute(stmt).scalars().all()
-    
+
+    return [
+        Shift(
+            employee_id=s.employee_id,
+            store_id=s.store_id,
+            department_id=s.department_id,
+            start_datetime=s.start_datetime_utc.replace(tzinfo=None),
+            end_datetime=s.end_datetime_utc.replace(tzinfo=None),
+        )
+        for s in rows
+    ]
+
+
+def load_previous_week_shifts(
+    db: Session,
+    store_id: int,
+    week_start: date,
+) -> list[Shift]:
+    """Load published shifts from the previous week for cross-week consecutive days enforcement."""
+    prev_week_start = week_start - timedelta(days=7)
+    prev_start_dt = datetime.combine(prev_week_start, time.min)
+    prev_end_dt = datetime.combine(week_start, time.min)
+
+    stmt = select(Shifts).where(
+        and_(
+            Shifts.store_id == store_id,
+            Shifts.status == ShiftStatus.PUBLISHED,
+            Shifts.start_datetime_utc >= prev_start_dt,
+            Shifts.start_datetime_utc < prev_end_dt,
+        )
+    )
+    rows = db.execute(stmt).scalars().all()
+
     return [
         Shift(
             employee_id=s.employee_id,
@@ -223,7 +256,11 @@ def load_schedule_context(db: Session, store_id: int, week_start: date) -> Sched
     
     employees = load_employees(db, store_id)
     employee_ids = [e.id for e in employees]
-    
+
+    store = db.query(Stores).filter(Stores.id == store_id).first()
+    day_start_hour = store.opening_time.hour if store and store.opening_time else 6
+    day_end_hour = store.closing_time.hour if store and store.closing_time else 22
+
     return ScheduleContext(
         store_id=store_id,
         week_start=week_start,
@@ -233,4 +270,7 @@ def load_schedule_context(db: Session, store_id: int, week_start: date) -> Sched
         coverage_requirements=load_coverage_requirements(db, store_id),
         role_requirements=load_role_requirements(db, store_id),
         existing_shifts=load_existing_shifts(db, store_id, week_start),
+        previous_week_shifts=load_previous_week_shifts(db, store_id, week_start),
+        day_start_hour=day_start_hour,
+        day_end_hour=day_end_hour,
     )

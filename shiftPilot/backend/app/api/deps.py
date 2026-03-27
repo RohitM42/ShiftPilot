@@ -139,7 +139,16 @@ def is_admin(db: Session, user: Users) -> bool:
 
 
 def user_owns_proposal(db: Session, user: Users, proposal: AIProposals) -> bool:
-    """Check if user owns the proposal (via output -> input)"""
+    """Check if user owns the proposal (via output -> input, or via employee for manual proposals)"""
+    # Manual proposal — check via employee record
+    if not proposal.ai_output_id:
+        employee = db.query(Employees).filter(Employees.user_id == user.id).first()
+        if not employee:
+            return False
+        changes = proposal.changes_json or {}
+        return changes.get("employee_id") == employee.id
+
+    # AI proposal — check via output/input chain
     output = db.query(AIOutputs).filter(AIOutputs.id == proposal.ai_output_id).first()
     if not output:
         return False

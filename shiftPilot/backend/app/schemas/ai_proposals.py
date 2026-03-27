@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
-from app.db.models.ai_proposals import ProposalType, ProposalStatus
+from app.db.models.ai_proposals import ProposalType, ProposalStatus, ProposalSource
 
 
 class AIProposalBase(BaseModel):
@@ -11,7 +11,9 @@ class AIProposalBase(BaseModel):
 
 
 class AIProposalCreate(AIProposalBase):
-    ai_output_id: int
+    ai_output_id: Optional[int] = None
+    source: ProposalSource = ProposalSource.AI
+    changes_json: Optional[dict] = None
 
 
 class AIProposalUpdate(BaseModel):
@@ -22,7 +24,9 @@ class AIProposalUpdate(BaseModel):
 
 class AIProposalResponse(AIProposalBase):
     id: int
-    ai_output_id: int
+    ai_output_id: Optional[int]
+    source: ProposalSource
+    changes_json: Optional[dict]
     status: ProposalStatus
     rejection_reason: Optional[str]
     last_actioned_by: Optional[int]

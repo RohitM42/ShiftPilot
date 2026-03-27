@@ -6,6 +6,7 @@ class DepartmentBase(BaseModel):
     name: str
     code: str
     has_manager_role: bool = False
+    active: bool = True
 
 
 class DepartmentCreate(DepartmentBase):

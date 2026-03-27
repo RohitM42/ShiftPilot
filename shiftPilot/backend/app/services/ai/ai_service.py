@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models.ai_inputs import AIInputs
 from app.db.models.ai_outputs import AIOutputs, AIOutputStatus
-from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus
+from app.db.models.ai_proposals import AIProposals, ProposalType, ProposalStatus, ProposalSource
 from app.db.models.users import Users
+from app.db.models.user_roles import UserRoles
 from app.api.deps import is_manager_or_admin
 
 from .llm_provider import get_llm_provider, LLMResponse
@@ -35,7 +36,7 @@ INTENT_TO_PROPOSAL_TYPE = {
 }
 
 
-def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AIOutputs:
+def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, explicit_store_id: Optional[int] = None, as_preview: bool = False) -> AIOutputs:
     """
     Main entry point. Processes an AI input and creates output + proposal.
 
@@ -52,13 +53,31 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     is_mgr_or_admin = is_manager_or_admin(db, current_user)
     employee_ctx = load_employee_context(db, current_user.id)
 
-    if not employee_ctx:
+    if not employee_ctx and not is_mgr_or_admin:
         return _create_error_output(db, ai_input, "No employee record found for user")
 
-    store_id = employee_ctx["store_id"]
+    store_id = employee_ctx["store_id"] if employee_ctx else None
+
+    # For admins/managers whose employee record has no store (global admin),
+    # fall back to the store_id from their role assignment
+    if store_id is None and is_mgr_or_admin:
+        role_with_store = db.query(UserRoles).filter(
+            UserRoles.user_id == current_user.id,
+            UserRoles.store_id.isnot(None),
+        ).first()
+        if role_with_store:
+            store_id = role_with_store.store_id
+
+    if store_id is None and explicit_store_id:
+        store_id = explicit_store_id
+
+    if store_id is None and is_mgr_or_admin:
+        return _create_error_output(db, ai_input, "No store associated with this account. Please contact a system administrator.")
 
     # 2. Build context based on role
-    context = {"employee": employee_ctx}
+    context = {}
+    if employee_ctx:
+        context["employee"] = employee_ctx
 
     if is_mgr_or_admin:
         store_ctx = load_store_context(db, store_id)
@@ -77,10 +96,12 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     llm_response = provider.generate_json(system_prompt, user_prompt)
 
     if not llm_response.success or not llm_response.parsed_json:
+        is_rate_limit = llm_response.error and "429" in llm_response.error
         return _create_error_output(
             db, ai_input,
             f"LLM processing failed: {llm_response.error}",
             model_used=llm_response.model_used,
+            is_transient=is_rate_limit,
         )
 
     result = llm_response.parsed_json
@@ -88,13 +109,6 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     # 5. Validate intent type
     intent_type = result.get("intent_type")
     if not intent_type or intent_type not in INTENT_TO_PROPOSAL_TYPE:
-        # TODO: Implement NEEDS_CLARIFICATION flow instead of error
-        if intent_type == "LABOUR_BUDGET":
-            return _create_error_output(
-                db, ai_input,
-                "Labour budget changes are not yet supported",
-                model_used=llm_response.model_used,
-            )
         return _create_error_output(
             db, ai_input,
             f"Unrecognised intent type: {intent_type}",
@@ -135,17 +149,18 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users) -> AI
     db.add(ai_output)
     db.flush()  # get ai_output.id without committing
 
-    # 7. Create proposal
-    proposal_type = INTENT_TO_PROPOSAL_TYPE[intent_type]
-
-    proposal = AIProposals(
-        ai_output_id=ai_output.id,
-        type=proposal_type,
-        store_id=result.get("store_id", store_id),
-        department_id=result.get("department_id"),
-        status=ProposalStatus.PENDING,
-    )
-    db.add(proposal)
+    # 7. Create proposal (skipped when as_preview=True — user must confirm via /from-output)
+    if not as_preview:
+        proposal_type = INTENT_TO_PROPOSAL_TYPE[intent_type]
+        proposal = AIProposals(
+            ai_output_id=ai_output.id,
+            source=ProposalSource.AI,
+            type=proposal_type,
+            store_id=result.get("store_id", store_id),
+            department_id=result.get("department_id"),
+            status=ProposalStatus.PENDING,
+        )
+        db.add(proposal)
 
     # 8. Mark input processed
     ai_input.processed = True
@@ -166,8 +181,11 @@ def _create_error_output(
     ai_input: AIInputs,
     error_msg: str,
     model_used: str = "none",
+    is_transient: bool = False,
 ) -> AIOutputs:
-    """Create an INVALID output for failed processing."""
+    """Create an INVALID output for failed processing.
+    is_transient=True (e.g. 429) leaves processed=False so the input can be retried.
+    """
     ai_output = AIOutputs(
         input_id=ai_input.id,
         result_json={"error": error_msg},
@@ -176,7 +194,7 @@ def _create_error_output(
         model_used=model_used,
     )
     db.add(ai_output)
-    ai_input.processed = True
+    ai_input.processed = not is_transient
     db.commit()
     db.refresh(ai_output)
     return ai_output
