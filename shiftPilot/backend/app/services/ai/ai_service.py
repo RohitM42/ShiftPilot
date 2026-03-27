@@ -123,6 +123,18 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, expli
             model_used=llm_response.model_used,
         )
 
+    # Managers use the direct interface for availability — NL pipeline handles scheduling rules only
+    if is_mgr_or_admin and intent_type == "AVAILABILITY":
+        return _create_error_output(
+            db, ai_input,
+            "Availability changes must be made through the availability interface",
+            model_used=llm_response.model_used,
+        )
+
+    # For employees, force employee_id to the authenticated user's own record (prevents targeting others)
+    if not is_mgr_or_admin and intent_type == "AVAILABILITY" and employee_ctx:
+        result["employee_id"] = employee_ctx["employee_id"]
+
     # 6. Create output
     summary = result.get("summary", "AI-generated constraint change proposal")
 
@@ -172,7 +184,7 @@ def process_ai_input(db: Session, ai_input: AIInputs, current_user: Users, expli
 
 def _get_allowed_types(is_mgr_or_admin: bool) -> List[str]:
     if is_mgr_or_admin:
-        return ["AVAILABILITY", "COVERAGE", "ROLE_REQUIREMENT"]
+        return ["COVERAGE", "ROLE_REQUIREMENT"]
     return ["AVAILABILITY"]
 
 

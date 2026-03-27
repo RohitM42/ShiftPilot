@@ -14,6 +14,8 @@ from app.db.models.ai_proposals import AIProposals, ProposalType
 from app.db.models.availability_rules import AvailabilityRules, AvailabilityRuleType
 from app.db.models.coverage_requirements import CoverageRequirements
 from app.db.models.role_requirements import RoleRequirements
+from app.db.models.users import Users
+from app.api.deps import check_store_access
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,14 @@ def apply_proposal(db: Session, proposal: AIProposals, approved_by_user_id: int)
     handler = handlers.get(intent_type)
     if not handler:
         raise ApprovalError(f"No handler for intent type: {intent_type}")
+
+    # For scheduling rule changes, validate the approver has access to the target store
+    if intent_type in ("COVERAGE", "ROLE_REQUIREMENT"):
+        store_id_in_result = result.get("store_id")
+        if store_id_in_result:
+            approver = db.query(Users).filter(Users.id == approved_by_user_id).first()
+            if approver and not check_store_access(db, approver, store_id_in_result):
+                raise ApprovalError("Approver does not have access to the target store")
 
     handler(db, result, approved_by_user_id)
 
